@@ -54,6 +54,15 @@ class ItemUpdate(BaseModel):
         return v.strip() if v else v
 
 
+class ItemMerge(BaseModel):
+    """Add a quantity onto an item that already has this name."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    quantity: Decimal = Field(gt=0, le=1_000_000)
+    unit: Unit
+
+
 class ItemRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
