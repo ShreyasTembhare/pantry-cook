@@ -31,7 +31,7 @@ jobs:
         run: uv run ruff format --check app tests
 
       - name: Pytest
-        run: uv run pytest -q
+        run: uv run pytest -q --cov=app/domain --cov=app/graph --cov-report=term-missing --cov-fail-under=85
 
   frontend:
     runs-on: ubuntu-latest

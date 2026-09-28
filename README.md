@@ -79,6 +79,22 @@ Revise with `POST /api/cook/<thread_id>/revise` and `{"note":"fewer steps"}`. Ab
 
 The cook graph pauses on a SqliteSaver checkpoint, so stopping the server after a proposal and starting it again still accepts confirm on the same thread id.
 
+### Hardening
+
+On startup the server marks a `running` cook with no user interrupt, older than 10 minutes, as `failed` (`interrupted_by_restart`). A checkpoint the library can no longer read becomes `checkpoint_unreadable` instead of a 500. Once an hour, proposals still `awaiting_user` past `expires_at` (24 hours from the start) are abandoned, and checkpoints for abandoned, committed, or failed sessions older than 7 days are deleted. Set `PANTRY_MAINTENANCE=0` to skip both.
+
+Confirming a proposal that uses an expired item returns `409 expired_unacknowledged` until the body includes `"acknowledge_expired": true`. The proposal footer shows a checkbox such as “I know the yoghurt expired Monday” and keeps Confirm off until it is checked.
+
+Adding a name that already exists returns `409 duplicate_item` with `extra.existing_id`. The pantry offers “Add … to it” when the unit is the same dimension (`POST /api/items/{id}/merge`) or “Rename” when it is not.
+
+A provider timeout becomes `504 llm_timeout` (“The chef took too long.”). A 429 becomes `429 llm_rate_limited` with a `Retry-After` header when the provider sent one; the error card counts that down before Try again is enabled. Logs are structured (`structlog`): JSON when `PANTRY_ENV=production`, a console renderer otherwise. Each request logs `request_id`, method, path, status, and `duration_ms`. Cook nodes log `session_id`, `node`, `attempt`, `duration_ms`, and `llm_model`. `GET /api/health` also reports `checkpointer` and `pending_sessions`.
+
+Backend coverage on `app/domain` and `app/graph` fails under 85%. Playwright: `frontend/e2e/persistence.spec.ts` (reload the awaiting proposal, then confirm) and `mobile.spec.ts` (390×844 add, revise, confirm).
+
+### Look
+
+The app opens on the pantry list. Neutrals are a warm sand scale, headings are Fraunces, and UI text is Geist, with tabular numerals on quantities. Expiry is the only semantic colour: amber for use soon, tomato for expired. There is no gradient, no hero, and no feature grid.
+
 ## Project Structure
 
 ```

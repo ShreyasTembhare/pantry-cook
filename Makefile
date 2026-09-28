@@ -15,7 +15,7 @@ dev-frontend:
 test: test-backend test-frontend
 
 test-backend:
-	cd backend && uv run pytest -q
+	cd backend && uv run pytest -q --cov=app/domain --cov=app/graph --cov-report=term-missing --cov-fail-under=85
 
 test-frontend:
 	cd frontend && pnpm test

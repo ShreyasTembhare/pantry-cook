@@ -1,1 +1,43 @@
-probe
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+
+# Build
+.next/
+out/
+dist/
+*.egg-info/
+
+# Data
+backend/data/
+*.sqlite
+
+# Environment
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+coverage/
+htmlcov/
+.coverage
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/AGENTS.md
+frontend/CLAUDE.md
