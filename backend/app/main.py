@@ -13,11 +13,14 @@ from app.observability import RequestIdMiddleware
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    from app.api.deps import close_graph, init_graph
     from app.db.engine import engine
     from app.db.models import Base
 
     Base.metadata.create_all(bind=engine)
+    init_graph()
     yield
+    close_graph()
 
 
 def create_app() -> FastAPI:
@@ -39,11 +42,15 @@ def create_app() -> FastAPI:
     app.add_exception_handler(DomainError, domain_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
 
+    from app.api.cook import router as cook_router
     from app.api.health import router as health_router
     from app.api.items import router as items_router
+    from app.api.meals import router as meals_router
 
     app.include_router(health_router)
     app.include_router(items_router)
+    app.include_router(cook_router)
+    app.include_router(meals_router)
 
     return app
 
