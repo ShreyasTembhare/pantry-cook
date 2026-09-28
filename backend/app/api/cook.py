@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from langgraph.errors import GraphInterrupt
@@ -10,21 +10,25 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_graph
 from app.api.meals import meal_to_read
-from app.db.models import CookSession
+from app.db.models import CookSession, Item
 from app.db.repositories import CookSessionRepository, ItemRepository, MealRepository
 from app.domain.errors import (
     CookFailedError,
     EmptyPantryError,
+    ExpiredUnacknowledgedError,
     SessionBusyError,
     SessionNotAwaitingError,
     StaleProposalError,
 )
 from app.domain.etag import proposal_etag
+from app.domain.expiry import is_expired
+from app.domain.sessions import apply_checkpoint, heal_if_running
 from app.graph.state import initial_cook_state
 from app.schemas.cook import (
     CookConfirmRequest,
     CookReviseRequest,
     CookSessionRead,
+    CookSessionSummary,
     CookStartRequest,
 )
 from app.schemas.llm import MealProposal, Violation
@@ -100,43 +104,35 @@ def _read_session(row: CookSession, graph: Any, db: Session | None = None) -> Co
 
 
 def _apply_outcome(row: CookSession, snapshot: Any) -> None:
-    values = _values(snapshot)
-    pending = tuple(getattr(snapshot, "next", ()) or ())
-    row.attempt_count = len(values.get("attempts") or [])
-    if pending:
-        row.status = "awaiting_user"
-        row.last_error = None
-        return
-    if values.get("decision") == "abandon":
-        row.status = "abandoned"
-        row.last_error = None
-        return
-    result = values.get("result")
-    if isinstance(result, dict) and result.get("meal_id"):
-        row.status = "committed"
-        row.meal_id = str(result["meal_id"])
-        row.last_error = None
-        return
-    error = values.get("error")
-    row.status = "failed"
-    row.last_error = (
-        error
-        if isinstance(error, dict)
-        else {
-            "code": "cook_failed",
-            "detail": "The cook session ended without a result.",
-        }
-    )
+    apply_checkpoint(row, snapshot)
 
 
 def _heal_running(row: CookSession, graph: Any) -> None:
     """Recover a session left ``running`` by a crash before the row was updated."""
-    if row.status != "running":
-        return
-    snapshot = _snapshot(graph, row.id)
-    if not _values(snapshot) and not tuple(getattr(snapshot, "next", ()) or ()):
-        return
-    _apply_outcome(row, snapshot)
+    heal_if_running(row, graph)
+
+
+def _expired_uses(db: Session, proposal: dict[str, Any]) -> list[dict[str, str]]:
+    found: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for line in proposal.get("lines") or []:
+        if not isinstance(line, dict) or line.get("kind") != "use":
+            continue
+        item_id = line.get("item_id")
+        if not isinstance(item_id, str) or item_id in seen:
+            continue
+        item = db.get(Item, item_id)
+        if item is None or not is_expired(item.expires_on):
+            continue
+        seen.add(item_id)
+        found.append(
+            {
+                "item_id": item.id,
+                "name": item.name,
+                "expires_on": item.expires_on.isoformat() if item.expires_on else "",
+            }
+        )
+    return found
 
 
 def _require_awaiting(row: CookSession) -> None:
@@ -173,6 +169,26 @@ def start_cook(
         return _read_session(row, graph)
     finally:
         lock.release()
+
+
+@router.get("", response_model=list[CookSessionSummary])
+def list_cook_sessions(
+    status: Literal[
+        "running", "awaiting_user", "committed", "abandoned", "failed"
+    ] = "awaiting_user",
+    db: Session = Depends(get_db),  # noqa: B008
+) -> list[CookSessionSummary]:
+    rows = CookSessionRepository(db).list(status)
+    return [
+        CookSessionSummary(
+            id=row.id,
+            status=row.status,  # type: ignore[arg-type]
+            sentence=row.sentence,
+            attempt_count=row.attempt_count,
+            updated_at=_iso(row.updated_at),
+        )
+        for row in rows
+    ]
 
 
 @router.get("/{thread_id}", response_model=CookSessionRead)
@@ -225,6 +241,9 @@ def confirm_cook(
         expected = proposal_etag(proposal, list(values.get("pantry_snapshot") or []))
         if body.proposal_etag != expected:
             raise StaleProposalError(reason="proposal_etag_mismatch")
+        expired = _expired_uses(db, proposal)
+        if expired and not body.acknowledge_expired:
+            raise ExpiredUnacknowledgedError(expired)
 
         row.status = "running"
         repo.touch(row)
