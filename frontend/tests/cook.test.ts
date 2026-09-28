@@ -45,6 +45,6 @@ describe("cook errors and shopping lists", () => {
         { kind: "missing", missing_name: "olive oil", missing_note: "a splash" },
         { kind: "missing", missing_name: "lemon", missing_note: null },
       ]),
-    ).toBe("olive oil \u2014 a splash\nlemon");
+    ).toBe("olive oil — a splash\nlemon");
   });
 });
