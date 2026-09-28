@@ -49,7 +49,33 @@ make lint          # lint both projects
 
 ### Environment
 
-Copy `.env.example` to `.env` and adjust as needed. The app runs in offline/demo mode by default (`LLM_PROVIDER=fake`).
+Copy `.env.example` to `.env` and adjust as needed. The app runs in offline/demo mode by default (`PANTRY_LLM_PROVIDER=fake`). No API key is required.
+
+### Cook a meal
+
+With the backend on port 8787 and a couple of pantry items:
+
+```bash
+curl -s -X POST localhost:8787/api/items \
+  -H 'content-type: application/json' \
+  -d '{"name":"Leeks","quantity":"300","unit":"g"}'
+
+curl -s -X POST localhost:8787/api/cook/start \
+  -H 'content-type: application/json' \
+  -d '{"sentence":"something warm with the leeks"}'
+```
+
+The start call returns a proposal and a `proposal_etag`. Confirm with that etag and the pantry quantity drops:
+
+```bash
+curl -s -X POST localhost:8787/api/cook/<thread_id>/confirm \
+  -H 'content-type: application/json' \
+  -d '{"proposal_etag":"<etag from the start response>"}'
+```
+
+Revise with `POST /api/cook/<thread_id>/revise` and `{"note":"fewer steps"}`. Abandon with `POST /api/cook/<thread_id>/abandon`. Cooked meals are `GET /api/meals` and `GET /api/meals/<id>`.
+
+The cook graph pauses on a SqliteSaver checkpoint, so stopping the server after a proposal and starting it again still accepts confirm on the same thread id.
 
 ## Project Structure
 
