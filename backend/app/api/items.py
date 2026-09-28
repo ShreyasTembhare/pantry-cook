@@ -7,7 +7,7 @@ from app.api.deps import get_db
 from app.db.models import Item
 from app.db.repositories import ItemRepository
 from app.domain.units import Dimension, Quantity, Unit
-from app.schemas.items import ItemCreate, ItemRead, ItemUpdate
+from app.schemas.items import ItemCreate, ItemMerge, ItemRead, ItemUpdate
 
 router = APIRouter(prefix="/api/items", tags=["items"])
 
@@ -71,6 +71,19 @@ def update_item(
 ) -> ItemRead:
     repo = ItemRepository(db)
     item = repo.update(item_id, body)
+    db.commit()
+    db.refresh(item)
+    return _item_to_read(item)
+
+
+@router.post("/{item_id}/merge", response_model=ItemRead)
+def merge_item(
+    item_id: str,
+    body: ItemMerge,
+    db: Session = Depends(get_db),  # noqa: B008
+) -> ItemRead:
+    repo = ItemRepository(db)
+    item = repo.add_quantity(item_id, body.quantity, body.unit)
     db.commit()
     db.refresh(item)
     return _item_to_read(item)

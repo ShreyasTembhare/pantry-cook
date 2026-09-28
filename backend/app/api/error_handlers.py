@@ -24,10 +24,15 @@ async def domain_error_handler(request: Request, exc: DomainError) -> JSONRespon
         extra=exc.extra or None,
         request_id=_get_request_id(request),
     )
+    headers: dict[str, str] = {}
+    retry_after = exc.extra.get("retry_after") if exc.code == "llm_rate_limited" else None
+    if isinstance(retry_after, int) and retry_after >= 0:
+        headers["Retry-After"] = str(retry_after)
     return JSONResponse(
         status_code=exc.status,
         content=problem.model_dump(exclude_none=True),
         media_type="application/problem+json",
+        headers=headers,
     )
 
 
