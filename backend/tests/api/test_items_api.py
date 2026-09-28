@@ -1,0 +1,204 @@
+"""Tests for the /api/items endpoints — CRUD, error responses."""
+
+import tempfile
+from collections.abc import Generator
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.api.deps import get_db
+from app.db.models import Base
+from app.main import create_app
+
+
+@pytest.fixture
+def client() -> Generator[TestClient, None, None]:
+    with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=True) as f:
+        url = f"sqlite:///{f.name}"
+        engine = create_engine(url)
+
+        def set_pragmas(dbapi_conn: object, _rec: object) -> None:
+            cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+        event.listen(engine, "connect", set_pragmas)
+        Base.metadata.create_all(bind=engine)
+        session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+        def override_db() -> Generator[Session, None, None]:
+            session = session_factory()
+            try:
+                yield session
+            finally:
+                session.close()
+
+        app = create_app()
+        app.dependency_overrides[get_db] = override_db
+
+        with TestClient(app) as tc:
+            yield tc
+
+
+class TestCreateItem:
+    def test_create_success(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/items",
+            json={"name": "Rice", "quantity": "500", "unit": "g"},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["name"] == "Rice"
+        assert data["unit"] == "g"
+        assert data["dimension"] == "mass"
+        assert data["version"] == 1
+        assert "id" in data
+
+    def test_create_with_expiry(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/items",
+            json={"name": "Milk", "quantity": "1", "unit": "L", "expires_on": "2025-03-15"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["expires_on"] == "2025-03-15"
+
+    def test_create_kg_stores_in_grams(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/items",
+            json={"name": "Flour", "quantity": "1.5", "unit": "kg"},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["quantity"] == "1.50"
+        assert data["unit"] == "kg"
+
+    def test_create_duplicate_409(self, client: TestClient) -> None:
+        client.post("/api/items", json={"name": "Rice", "quantity": "500", "unit": "g"})
+        resp = client.post("/api/items", json={"name": "rice", "quantity": "200", "unit": "g"})
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["code"] == "duplicate_item"
+        assert "existing_id" in body.get("extra", {})
+
+    def test_create_blank_name_422(self, client: TestClient) -> None:
+        resp = client.post("/api/items", json={"name": "   ", "quantity": "500", "unit": "g"})
+        assert resp.status_code == 422
+        body = resp.json()
+        assert body["code"] == "validation_failed"
+
+    def test_create_negative_quantity_422(self, client: TestClient) -> None:
+        resp = client.post("/api/items", json={"name": "Rice", "quantity": "-1", "unit": "g"})
+        assert resp.status_code == 422
+
+    def test_request_id_in_response(self, client: TestClient) -> None:
+        resp = client.post("/api/items", json={"name": "Rice", "quantity": "500", "unit": "g"})
+        assert "x-request-id" in resp.headers
+
+    def test_problem_details_content_type(self, client: TestClient) -> None:
+        client.post("/api/items", json={"name": "Rice", "quantity": "500", "unit": "g"})
+        resp = client.post("/api/items", json={"name": "rice", "quantity": "200", "unit": "g"})
+        assert resp.headers["content-type"] == "application/problem+json"
+
+
+class TestListItems:
+    def test_list_empty(self, client: TestClient) -> None:
+        resp = client.get("/api/items")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_list_returns_items(self, client: TestClient) -> None:
+        client.post("/api/items", json={"name": "Rice", "quantity": "500", "unit": "g"})
+        client.post("/api/items", json={"name": "Flour", "quantity": "1", "unit": "kg"})
+
+        resp = client.get("/api/items")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+
+
+class TestGetItem:
+    def test_get_existing(self, client: TestClient) -> None:
+        create_resp = client.post(
+            "/api/items", json={"name": "Rice", "quantity": "500", "unit": "g"}
+        )
+        item_id = create_resp.json()["id"]
+
+        resp = client.get(f"/api/items/{item_id}")
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Rice"
+
+    def test_get_missing_404(self, client: TestClient) -> None:
+        resp = client.get("/api/items/nonexistent")
+        assert resp.status_code == 404
+        body = resp.json()
+        assert body["code"] == "item_not_found"
+
+
+class TestUpdateItem:
+    def test_update_name(self, client: TestClient) -> None:
+        create_resp = client.post(
+            "/api/items", json={"name": "Rice", "quantity": "500", "unit": "g"}
+        )
+        item_id = create_resp.json()["id"]
+
+        resp = client.patch(f"/api/items/{item_id}", json={"name": "Brown Rice", "version": 1})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "Brown Rice"
+        assert data["version"] == 2
+
+    def test_update_quantity(self, client: TestClient) -> None:
+        create_resp = client.post(
+            "/api/items", json={"name": "Rice", "quantity": "500", "unit": "g"}
+        )
+        item_id = create_resp.json()["id"]
+
+        resp = client.patch(f"/api/items/{item_id}", json={"quantity": "300", "version": 1})
+        assert resp.status_code == 200
+        assert resp.json()["quantity"] == "300.00"
+
+    def test_update_stale_version_409(self, client: TestClient) -> None:
+        create_resp = client.post(
+            "/api/items", json={"name": "Rice", "quantity": "500", "unit": "g"}
+        )
+        item_id = create_resp.json()["id"]
+
+        client.patch(f"/api/items/{item_id}", json={"name": "Brown Rice", "version": 1})
+        resp = client.patch(f"/api/items/{item_id}", json={"name": "White Rice", "version": 1})
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "stale_version"
+
+    def test_update_missing_404(self, client: TestClient) -> None:
+        resp = client.patch("/api/items/nonexistent", json={"name": "X", "version": 1})
+        assert resp.status_code == 404
+
+    def test_update_rename_to_duplicate_409(self, client: TestClient) -> None:
+        client.post("/api/items", json={"name": "Rice", "quantity": "500", "unit": "g"})
+        create_resp = client.post(
+            "/api/items", json={"name": "Flour", "quantity": "1", "unit": "kg"}
+        )
+        item_id = create_resp.json()["id"]
+
+        resp = client.patch(f"/api/items/{item_id}", json={"name": "Rice", "version": 1})
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "duplicate_item"
+
+
+class TestDeleteItem:
+    def test_delete_success(self, client: TestClient) -> None:
+        create_resp = client.post(
+            "/api/items", json={"name": "Rice", "quantity": "500", "unit": "g"}
+        )
+        item_id = create_resp.json()["id"]
+
+        resp = client.delete(f"/api/items/{item_id}")
+        assert resp.status_code == 204
+
+        resp = client.get(f"/api/items/{item_id}")
+        assert resp.status_code == 404
+
+    def test_delete_missing_404(self, client: TestClient) -> None:
+        resp = client.delete("/api/items/nonexistent")
+        assert resp.status_code == 404
