@@ -11,24 +11,36 @@ os.environ.setdefault("PANTRY_LLM_PROVIDER", "fake")
 from app.db.models import Base
 
 
+def _sqlite_engine(path: str) -> object:
+    engine = create_engine(f"sqlite:///{path}")
+
+    def set_pragmas(dbapi_conn: object, _rec: object) -> None:
+        cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    event.listen(engine, "connect", set_pragmas)
+    return engine
+
+
 @pytest.fixture
-def db_session() -> Generator[Session, None, None]:
-    """Create a fresh SQLite database for each test."""
-    with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=True) as f:
-        url = f"sqlite:///{f.name}"
-        engine = create_engine(url)
-
-        def set_pragmas(dbapi_conn: object, _rec: object) -> None:
-            cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-
-        event.listen(engine, "connect", set_pragmas)
+def session_factory() -> Generator[sessionmaker[Session], None, None]:
+    """Fresh SQLite file and session factory for one test."""
+    with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=True) as handle:
+        engine = _sqlite_engine(handle.name)
         Base.metadata.create_all(bind=engine)
-        session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-        session = session_factory()
+        factory = sessionmaker(bind=engine, expire_on_commit=False)
         try:
-            yield session
+            yield factory
         finally:
-            session.close()
             engine.dispose()
+
+
+@pytest.fixture
+def db_session(session_factory: sessionmaker[Session]) -> Generator[Session, None, None]:
+    """Create a fresh SQLite database for each test."""
+    session = session_factory()
+    try:
+        yield session
+    finally:
+        session.close()
