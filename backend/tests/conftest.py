@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 os.environ.setdefault("PANTRY_LLM_PROVIDER", "fake")
+os.environ.setdefault("PANTRY_MAINTENANCE", "0")
 
 from app.db.models import Base
 
