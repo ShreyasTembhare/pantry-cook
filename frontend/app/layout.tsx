@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import { Fraunces } from "next/font/google";
 import "./globals.css";
+import { Providers } from "@/components/providers";
 import { Shell } from "@/components/shell/shell";
 
 const geistSans = Geist({
@@ -36,7 +37,9 @@ export default function RootLayout({
         />
       </head>
       <body className="h-full font-sans antialiased">
-        <Shell>{children}</Shell>
+        <Providers>
+          <Shell>{children}</Shell>
+        </Providers>
       </body>
     </html>
   );

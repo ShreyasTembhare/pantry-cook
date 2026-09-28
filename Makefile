@@ -1,5 +1,7 @@
 .PHONY: dev dev-backend dev-frontend test test-backend lint lint-backend lint-frontend typecheck format install
 
+# ── Development ──────────────────────────────────────────────
+
 dev: dev-backend dev-frontend
 
 dev-backend:
@@ -8,10 +10,17 @@ dev-backend:
 dev-frontend:
 	cd frontend && pnpm dev
 
-test: test-backend
+# ── Testing ──────────────────────────────────────────────────
+
+test: test-backend test-frontend
 
 test-backend:
 	cd backend && uv run pytest -q
+
+test-frontend:
+	cd frontend && pnpm test
+
+# ── Linting ──────────────────────────────────────────────────
 
 lint: lint-backend lint-frontend
 
@@ -25,9 +34,13 @@ lint-frontend:
 typecheck:
 	cd frontend && pnpm typecheck
 
+# ── Formatting ───────────────────────────────────────────────
+
 format:
 	cd backend && uv run ruff format app tests
 	cd backend && uv run ruff check --fix app tests
+
+# ── Installation ────────────────────────────────────────────────
 
 install:
 	cd backend && uv sync --all-extras

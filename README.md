@@ -2,6 +2,8 @@
 
 A single-user web app for tracking a home pantry and turning a plain sentence into a structured, quantity-aware meal proposal. Built with FastAPI, LangGraph, Next.js, and shadcn/ui.
 
+The home page is the pantry: items grouped by urgency, with quick-add, inline edit, and delete.
+
 ## Tech Stack
 
 **Backend** — Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2, Alembic, LangChain, LangGraph, SQLite
@@ -43,7 +45,7 @@ Or use the Makefile:
 make install       # install all dependencies
 make dev-backend   # start backend on :8787
 make dev-frontend  # start frontend on :3939
-make test          # run all tests
+make test          # run backend and frontend tests
 make lint          # lint both projects
 ```
 
