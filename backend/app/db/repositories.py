@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-from sqlalchemy import asc, nullslast, select
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import asc, desc, nullslast, select
 from sqlalchemy.orm import Session
 
-from app.db.models import Item
-from app.domain.errors import DuplicateItemError, ItemNotFoundError, StaleVersionError
+from app.db.models import CookSession, Item, Meal
+from app.domain.errors import (
+    DuplicateItemError,
+    ItemNotFoundError,
+    MealNotFoundError,
+    SessionNotFoundError,
+    StaleVersionError,
+)
 from app.domain.units import Dimension, Quantity, Unit
 from app.schemas.items import ItemCreate, ItemUpdate, normalise_name_key
 
@@ -121,3 +129,54 @@ class ItemRepository:
             Dimension(item.dimension),
             Unit(item.display_unit),
         )
+
+
+def _now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+class MealRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def list(self, status: str | None = "cooked") -> list[Meal]:
+        stmt = select(Meal).order_by(desc(Meal.created_at), desc(Meal.id))
+        if status:
+            stmt = stmt.where(Meal.status == status)
+        return list(self._db.execute(stmt).scalars().all())
+
+    def get(self, meal_id: str) -> Meal:
+        meal = self._db.get(Meal, meal_id)
+        if meal is None:
+            raise MealNotFoundError(meal_id)
+        return meal
+
+
+class CookSessionRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def create(self, sentence: str) -> CookSession:
+        now = _now()
+        row = CookSession(
+            sentence=sentence,
+            status="running",
+            attempt_count=0,
+            created_at=now,
+            updated_at=now,
+            expires_at=now + timedelta(hours=24),
+        )
+        self._db.add(row)
+        self._db.flush()
+        return row
+
+    def get(self, session_id: str) -> CookSession:
+        row = self._db.get(CookSession, session_id)
+        if row is None:
+            raise SessionNotFoundError(session_id)
+        return row
+
+    def touch(self, row: CookSession) -> CookSession:
+        row.updated_at = _now()
+        self._db.flush()
+        return row
