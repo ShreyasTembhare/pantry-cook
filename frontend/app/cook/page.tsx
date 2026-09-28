@@ -1,15 +1,22 @@
+import { Suspense } from "react";
+
+import { CookStart } from "@/components/cook/cook-start";
+import { CookStartSkeleton } from "@/components/cook/cook-skeleton";
+
+export const metadata = {
+  title: "Cook · Pantry Cook",
+};
+
 export default function CookPage() {
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
-      <h2 className="font-serif text-2xl font-semibold tracking-tight mb-6">
-        Cook
-      </h2>
-      <div className="rounded-lg border border-border bg-card p-8 text-center">
-        <p className="text-muted-foreground text-sm leading-relaxed max-w-md mx-auto">
-          Describe what you feel like eating and the cook will propose a meal
-          from your pantry.
-        </p>
-      </div>
-    </div>
+    <Suspense
+      fallback={
+        <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
+          <CookStartSkeleton />
+        </div>
+      }
+    >
+      <CookStart />
+    </Suspense>
   );
 }
