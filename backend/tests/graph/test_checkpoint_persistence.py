@@ -12,6 +12,7 @@ from app.db.models import Item, Meal
 from app.db.repositories import ItemRepository
 from app.domain.units import Unit
 from app.graph.builder import build_graph
+from app.graph.checkpointer import StreamingSqliteSaver
 from app.graph.llm import FakeMealModel
 from app.graph.state import initial_cook_state
 from app.schemas.items import ItemCreate
@@ -66,3 +67,41 @@ def test_resume_after_graph_rebuild(
     assert meals[0].status == "cooked"
     db.close()
     conn2.close()
+
+
+async def test_astream_then_sync_resume(
+    session_factory: sessionmaker[Session], tmp_path: object
+) -> None:
+    """The file checkpointer must serve astream and a later sync resume."""
+    db = session_factory()
+    ItemRepository(db).create(
+        ItemCreate(name="Leeks", quantity=Decimal("300"), unit=Unit.G, expires_on=soon(1))
+    )
+    db.commit()
+    db.close()
+
+    checkpoint = tmp_path / "stream.sqlite"  # type: ignore[operator]
+    thread_id = "stream-then-resume"
+    config = {"configurable": {"thread_id": thread_id}}
+    conn = sqlite3.connect(str(checkpoint), check_same_thread=False, timeout=30)
+    saver = StreamingSqliteSaver(conn)
+    saver.setup()
+    graph = build_graph(saver, FakeMealModel(), session_factory)
+    nodes: list[str] = []
+    async for mode, data in graph.astream(
+        initial_cook_state(thread_id, "something warm with the leeks"),
+        config,
+        stream_mode=["updates", "messages"],
+        durability="sync",
+    ):
+        if mode == "updates" and isinstance(data, dict):
+            nodes.extend(name for name in data if not str(name).startswith("__"))
+    assert "propose_meal" in nodes
+    paused = graph.get_state(config)
+    assert paused.next == ("await_user",)
+
+    graph.invoke(Command(resume={"decision": "abandon"}), config, durability="sync")
+    finished = graph.get_state(config)
+    assert finished.next == ()
+    assert finished.values["decision"] == "abandon"
+    conn.close()

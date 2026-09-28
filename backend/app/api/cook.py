@@ -34,6 +34,8 @@ router = APIRouter(prefix="/api/cook", tags=["cook"])
 
 _locks_guard = threading.Lock()
 _session_locks: dict[str, threading.Lock] = {}
+# Resume payloads armed by a deferred revise. The stream endpoint consumes them.
+_pending_resume: dict[str, dict[str, Any]] = {}
 
 
 def _session_lock(session_id: str) -> threading.Lock:
@@ -71,7 +73,8 @@ def _iso(value: Any) -> str:
     return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
 
-def _read_session(row: CookSession, graph: Any) -> CookSessionRead:
+def _read_session(row: CookSession, graph: Any, db: Session | None = None) -> CookSessionRead:
+    del db
     snapshot = _snapshot(graph, row.id)
     values = _values(snapshot)
     proposal_raw = values.get("proposal")
@@ -151,6 +154,9 @@ def start_cook(
         raise EmptyPantryError()
     row = CookSessionRepository(db).create(body.sentence)
     db.commit()
+    if body.defer:
+        db.refresh(row)
+        return _read_session(row, graph)
     thread_id = row.id
     lock = _session_lock(thread_id)
     if not lock.acquire(blocking=False):
@@ -191,7 +197,10 @@ def revise_cook(
     db: Session = Depends(get_db),  # noqa: B008
     graph: Any = Depends(get_graph),  # noqa: B008
 ) -> CookSessionRead:
-    return _resume(db, graph, thread_id, {"decision": "revise", "note": body.note})
+    payload = {"decision": "revise", "note": body.note}
+    if body.defer:
+        return _arm_resume(db, graph, thread_id, payload)
+    return _resume(db, graph, thread_id, payload)
 
 
 @router.post("/{thread_id}/confirm", response_model=MealRead)
@@ -267,6 +276,28 @@ def abandon_cook(
         _invoke(graph, Command(resume={"decision": "abandon"}), thread_id)
         db.refresh(row)
         _apply_outcome(row, _snapshot(graph, thread_id))
+        repo.touch(row)
+        db.commit()
+        db.refresh(row)
+        return _read_session(row, graph)
+    finally:
+        lock.release()
+
+
+def _arm_resume(
+    db: Session, graph: Any, thread_id: str, payload: dict[str, Any]
+) -> CookSessionRead:
+    """Mark the session running and let the stream endpoint resume the graph."""
+    lock = _session_lock(thread_id)
+    if not lock.acquire(blocking=False):
+        raise SessionBusyError()
+    try:
+        repo = CookSessionRepository(db)
+        row = repo.get(thread_id)
+        _heal_running(row, graph)
+        _require_awaiting(row)
+        _pending_resume[thread_id] = payload
+        row.status = "running"
         repo.touch(row)
         db.commit()
         db.refresh(row)
