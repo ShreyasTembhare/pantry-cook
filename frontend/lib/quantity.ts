@@ -14,6 +14,12 @@ const DIMENSION: Record<string, string> = {
   count: "count",
 };
 
+export function dimensionOf(unit: string): "mass" | "volume" | "count" | null {
+  const value = DIMENSION[unit];
+  if (value === "mass" || value === "volume" || value === "count") return value;
+  return null;
+}
+
 export function trimAmount(value: number): string {
   if (!Number.isFinite(value)) return "";
   const rounded = Math.round((value + Number.EPSILON) * 100) / 100;

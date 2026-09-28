@@ -9,6 +9,7 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
     css: false,
+    exclude: ["**/node_modules/**", "**/dist/**", "e2e/**", "playwright.config.ts"],
   },
   resolve: {
     alias: {
