@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+from collections.abc import Iterator
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import RunnableLambda
-from pydantic import BaseModel, Field
+from langchain_core.runnables.config import RunnableConfig
+from pydantic import BaseModel, Field, PrivateAttr
 
 from app.config import Settings
 from app.config import settings as default_settings
@@ -32,6 +35,8 @@ class FakeMealModel(BaseChatModel):
 
     script: list[Any] = Field(default_factory=list)
     received: list[Any] = Field(default_factory=list)
+    _stream_payload: str = PrivateAttr(default="")
+    _echoing: bool = PrivateAttr(default=False)
 
     @property
     def _llm_type(self) -> str:
@@ -45,45 +50,105 @@ class FakeMealModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         del stop, run_manager, kwargs
-        self.received.append(messages)
-        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="{}"))])
+        if not self._echoing:
+            self.received.append(messages)
+        text = self._stream_payload or "{}"
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=text))])
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        """Yield the scripted proposal so graph ``messages`` mode can see tokens."""
+        del messages, stop, run_manager, kwargs
+        text = self._stream_payload or "{}"
+        step = 36
+        for index in range(0, len(text), step):
+            yield ChatGenerationChunk(message=AIMessageChunk(content=text[index : index + step]))
 
     def with_structured_output(self, schema: Any, **kwargs: Any) -> RunnableLambda:
         del kwargs
 
-        def _call(messages: Any) -> BaseModel:
+        def _call(messages: Any, config: RunnableConfig | None = None) -> BaseModel:
             self.received.append(messages)
-            if self.script:
-                head = self.script[0]
-                if isinstance(head, str):
-                    self.script.pop(0)
-                    raise ValueError(head)
-                if isinstance(head, Exception):
-                    self.script.pop(0)
-                    raise head
-                if (
-                    isinstance(head, BaseModel)
-                    and isinstance(schema, type)
-                    and isinstance(head, schema)
-                ):
-                    self.script.pop(0)
-                    return head
-            return _rules_for(schema, messages)
+            result = _next_scripted(self, schema, messages)
+            if schema is MealProposal:
+                self._stream_payload = result.model_dump_json()
+                self._echoing = True
+                try:
+                    # LangGraph's messages handler turns this into proposal tokens.
+                    self.invoke(messages, config)
+                finally:
+                    self._echoing = False
+                    self._stream_payload = ""
+            return result
 
         return RunnableLambda(_call)
 
 
-def get_llm(app_settings: Settings | None = None) -> FakeMealModel:
-    """Return the offline model.
+def _next_scripted(model: FakeMealModel, schema: Any, messages: Any) -> BaseModel:
+    if model.script:
+        head = model.script[0]
+        if isinstance(head, str):
+            model.script.pop(0)
+            raise ValueError(head)
+        if isinstance(head, Exception):
+            model.script.pop(0)
+            raise head
+        if isinstance(head, BaseModel) and isinstance(schema, type) and isinstance(head, schema):
+            model.script.pop(0)
+            return head
+    return _rules_for(schema, messages)
 
-    M3 does not call a hosted provider. ``PANTRY_LLM_PROVIDER=fake`` is the
-    default, and a real provider without this milestone's wiring stays on the
-    fake model so the app boots with no API key.
+
+def llm_mode(app_settings: Settings | None = None) -> str:
+    """Effective chef: ``real`` only when config asks for it and a key is set."""
+    cfg = app_settings or default_settings
+    provider = (cfg.llm_provider or "auto").strip().lower()
+    if provider == "fake":
+        return "fake"
+    if _has_provider_key(cfg):
+        return "real"
+    return "fake"
+
+
+def get_llm(app_settings: Settings | None = None) -> BaseChatModel:
+    """Return ``init_chat_model`` when a provider key is set, else the offline chef.
+
+    The model id (``openai:gpt-4o-mini`` by default) is configuration. There is
+    no per-vendor branch. ``PANTRY_LLM_PROVIDER=fake`` always stays offline so
+    tests and the demo chef do not call a hosted model.
     """
     cfg = app_settings or default_settings
-    if cfg.llm_provider not in {"fake", "real"}:
+    if llm_mode(cfg) == "fake":
         return FakeMealModel()
-    return FakeMealModel()
+    key = cfg.openai_api_key.strip()
+    if key and not os.environ.get("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = key
+    model = (cfg.llm_model or "openai:gpt-4o-mini").strip() or "openai:gpt-4o-mini"
+    return _init_chat_model(model, temperature=0, timeout=30, max_retries=2)
+
+
+def _init_chat_model(model: str, **kwargs: Any) -> BaseChatModel:
+    from langchain.chat_models import init_chat_model
+
+    chat = init_chat_model(model, **kwargs)
+    if not isinstance(chat, BaseChatModel):
+        raise TypeError(f"init_chat_model({model!r}) did not return a chat model")
+    return chat
+
+
+def _has_provider_key(cfg: Settings) -> bool:
+    candidates = (
+        cfg.openai_api_key,
+        os.environ.get("OPENAI_API_KEY", ""),
+        os.environ.get("ANTHROPIC_API_KEY", ""),
+        os.environ.get("GOOGLE_API_KEY", ""),
+    )
+    return any(value.strip() for value in candidates)
 
 
 def _message_text(messages: Any) -> str:

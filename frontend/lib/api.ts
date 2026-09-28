@@ -183,7 +183,7 @@ const missingLineSchema = z.object({
   quantity_note: z.string().nullable().optional(),
 });
 
-const proposalSchema = z.object({
+export const proposalSchema = z.object({
   title: z.string(),
   servings: z.number().int(),
   lines: z.array(z.discriminatedUnion("kind", [useLineSchema, missingLineSchema])),
@@ -276,10 +276,14 @@ export function getHealth(): Promise<Health> {
   return request("/api/health", healthSchema);
 }
 
-export function startCook(sentence: string): Promise<CookSession> {
+export function cookStreamUrl(id: string): string {
+  return `${API_URL}/api/cook/${encodeURIComponent(id)}/stream`;
+}
+
+export function startCook(sentence: string, options?: { defer?: boolean }): Promise<CookSession> {
   return request("/api/cook/start", cookSessionSchema, {
     method: "POST",
-    body: JSON.stringify({ sentence }),
+    body: JSON.stringify({ sentence, defer: Boolean(options?.defer) }),
   });
 }
 
@@ -291,10 +295,14 @@ export function getCook(id: string): Promise<CookSession> {
   return request(`/api/cook/${id}`, cookSessionSchema);
 }
 
-export function reviseCook(id: string, note: string): Promise<CookSession> {
+export function reviseCook(
+  id: string,
+  note: string,
+  options?: { defer?: boolean },
+): Promise<CookSession> {
   return request(`/api/cook/${id}/revise`, cookSessionSchema, {
     method: "POST",
-    body: JSON.stringify({ note }),
+    body: JSON.stringify({ note, defer: Boolean(options?.defer) }),
   });
 }
 
