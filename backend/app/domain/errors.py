@@ -121,6 +121,38 @@ class StaleProposalError(DomainError):
         self.changed_item_ids = list(changed_item_ids or [])
 
 
+class UnitDimensionMismatchError(DomainError):
+    def __init__(self, item_dimension: str, unit_dimension: str) -> None:
+        super().__init__(
+            code="unit_dimension_mismatch",
+            status=422,
+            detail="That unit is a different kind of measure from the item.",
+            extra={"item_dimension": item_dimension, "unit_dimension": unit_dimension},
+        )
+
+
+class QuantityLimitError(DomainError):
+    def __init__(self) -> None:
+        super().__init__(
+            code="quantity_limit",
+            status=422,
+            detail="That would put the quantity over the limit.",
+        )
+
+
+class ExpiredUnacknowledgedError(DomainError):
+    def __init__(self, items: list[dict[str, Any]]) -> None:
+        names = ", ".join(str(item.get("name") or "an item") for item in items)
+        super().__init__(
+            code="expired_unacknowledged",
+            status=409,
+            detail=(
+                f"This proposal uses expired food ({names}). Confirm you still want to cook it."
+            ),
+            extra={"expired_items": items},
+        )
+
+
 class InsufficientQuantityError(DomainError):
     def __init__(self, item_id: str, requested: str, available: str) -> None:
         super().__init__(
@@ -134,6 +166,13 @@ class InsufficientQuantityError(DomainError):
 class CookFailedError(DomainError):
     def __init__(self, error: dict[str, Any]) -> None:
         code = str(error.get("code") or "cook_failed")
-        status = 502 if code.startswith("llm_") else 422
+        if code == "llm_timeout":
+            status = 504
+        elif code == "llm_rate_limited":
+            status = 429
+        elif code.startswith("llm_"):
+            status = 502
+        else:
+            status = 422
         detail = str(error.get("detail") or "The cook session failed.")
         super().__init__(code=code, status=status, detail=detail, extra=error)
