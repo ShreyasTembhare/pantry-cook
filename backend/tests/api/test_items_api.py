@@ -159,6 +159,21 @@ class TestUpdateItem:
         assert resp.status_code == 200
         assert resp.json()["quantity"] == "300.00"
 
+    def test_clear_expiry(self, client: TestClient) -> None:
+        create_resp = client.post(
+            "/api/items",
+            json={"name": "Milk", "quantity": "1", "unit": "L", "expires_on": "2026-10-02"},
+        )
+        item_id = create_resp.json()["id"]
+
+        kept = client.patch(f"/api/items/{item_id}", json={"name": "Whole milk", "version": 1})
+        assert kept.status_code == 200
+        assert kept.json()["expires_on"] == "2026-10-02"
+
+        cleared = client.patch(f"/api/items/{item_id}", json={"expires_on": None, "version": 2})
+        assert cleared.status_code == 200
+        assert cleared.json()["expires_on"] is None
+
     def test_update_stale_version_409(self, client: TestClient) -> None:
         create_resp = client.post(
             "/api/items", json={"name": "Rice", "quantity": "500", "unit": "g"}

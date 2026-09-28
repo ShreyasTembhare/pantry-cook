@@ -172,6 +172,26 @@ class TestItemRepositoryUpdate:
 
         assert exc_info.value.code == "stale_version"
 
+    def test_clear_expiry_when_field_is_sent(self, db_session: Session) -> None:
+        repo = ItemRepository(db_session)
+        item = repo.create(
+            ItemCreate(
+                name="Milk",
+                quantity=Decimal("1"),
+                unit=Unit.L,
+                expires_on=date(2026, 10, 2),
+            )
+        )
+        db_session.commit()
+
+        renamed = repo.update(item.id, ItemUpdate(name="Whole milk", version=1))
+        db_session.commit()
+        assert renamed.expires_on == date(2026, 10, 2)
+
+        cleared = repo.update(item.id, ItemUpdate(expires_on=None, version=2))
+        db_session.commit()
+        assert cleared.expires_on is None
+
     def test_rename_to_duplicate_rejected(self, db_session: Session) -> None:
         repo = ItemRepository(db_session)
         repo.create(ItemCreate(name="Rice", quantity=Decimal("500"), unit=Unit.G))
