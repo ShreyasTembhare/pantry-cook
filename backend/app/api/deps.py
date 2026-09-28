@@ -26,10 +26,9 @@ def init_graph() -> Any:
     if _graph is not None:
         return _graph
 
-    from langgraph.checkpoint.sqlite import SqliteSaver
-
     from app.config import settings
     from app.graph.builder import build_graph
+    from app.graph.checkpointer import StreamingSqliteSaver
     from app.graph.llm import get_llm
 
     settings.checkpoint_db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -38,7 +37,7 @@ def init_graph() -> Any:
         check_same_thread=False,
         timeout=30,
     )
-    saver = SqliteSaver(_checkpoint_conn)
+    saver = StreamingSqliteSaver(_checkpoint_conn)
     saver.setup()
     _graph = build_graph(saver, get_llm(settings), SessionLocal)
     return _graph

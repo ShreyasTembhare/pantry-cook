@@ -11,6 +11,7 @@ class CookStartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sentence: str = Field(min_length=3, max_length=500)
+    defer: bool = False
 
     @field_validator("sentence")
     @classmethod
@@ -27,6 +28,7 @@ class CookReviseRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     note: str = Field(min_length=1, max_length=300)
+    defer: bool = False
 
     @field_validator("note")
     @classmethod

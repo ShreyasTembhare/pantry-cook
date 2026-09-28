@@ -43,6 +43,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
 
     from app.api.cook import router as cook_router
+    from app.api.cook_stream import router as cook_stream_router
     from app.api.health import router as health_router
     from app.api.items import router as items_router
     from app.api.meals import router as meals_router
@@ -50,6 +51,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(items_router)
     app.include_router(cook_router)
+    app.include_router(cook_stream_router)
     app.include_router(meals_router)
 
     return app
