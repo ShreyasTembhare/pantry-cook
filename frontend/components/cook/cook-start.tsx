@@ -31,7 +31,7 @@ export function CookStart() {
   });
 
   const start = useMutation({
-    mutationFn: (next: string) => startCook(next),
+    mutationFn: (next: string) => startCook(next, { defer: true }),
     onSuccess: (session) => {
       queryClient.setQueryData(["cook", session.id], session);
       void queryClient.invalidateQueries({ queryKey: ["cook-sessions"] });

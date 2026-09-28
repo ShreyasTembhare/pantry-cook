@@ -3,12 +3,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { CookErrorCard } from "@/components/cook/cook-error";
 import { ProposalSkeleton } from "@/components/cook/cook-skeleton";
-import { ProposalCard, type PantryAmount } from "@/components/cook/proposal-card";
+import { ProgressRail } from "@/components/cook/progress-rail";
+import { ProposalCard, type PantryAmount, type ProposalView } from "@/components/cook/proposal-card";
 import { Button } from "@/components/ui/button";
 import {
   abandonCook,
@@ -21,6 +22,9 @@ import {
   type CookSession,
 } from "@/lib/api";
 import { cookErrorPresentation, retriesSameSentence } from "@/lib/cook";
+import { proposalFromTokens } from "@/lib/reveal";
+import { useCookStream } from "@/lib/use-cook-stream";
+import { useRevealedProposal } from "@/lib/use-revealed-proposal";
 
 const REPROPOSE_NOTE = "The pantry changed. Propose again from what's there now.";
 
@@ -33,7 +37,6 @@ export function CookSessionView({ id }: { id: string }) {
   const sessionQuery = useQuery({
     queryKey: ["cook", id],
     queryFn: () => getCook(id),
-    refetchInterval: (query) => (query.state.data?.status === "running" ? 1500 : false),
   });
 
   const itemsQuery = useQuery({
@@ -47,7 +50,7 @@ export function CookSessionView({ id }: { id: string }) {
   }
 
   const revise = useMutation({
-    mutationFn: (note: string) => reviseCook(id, note),
+    mutationFn: (note: string) => reviseCook(id, note, { defer: true }),
     onSuccess: (session) => {
       setStaleOverride(null);
       setActionError(null);
@@ -109,7 +112,7 @@ export function CookSessionView({ id }: { id: string }) {
   });
 
   const restart = useMutation({
-    mutationFn: (sentence: string) => startCook(sentence),
+    mutationFn: (sentence: string) => startCook(sentence, { defer: true }),
     onSuccess: (session) => {
       queryClient.setQueryData(["cook", session.id], session);
       void queryClient.invalidateQueries({ queryKey: ["cook-sessions"] });
@@ -123,6 +126,15 @@ export function CookSessionView({ id }: { id: string }) {
 
   const busy = revise.isPending || confirm.isPending || abandon.isPending || restart.isPending;
   const session = sessionQuery.data;
+  const streaming = session?.status === "running";
+  const stream = useCookStream(id, streaming, remember);
+  const partial = useMemo(
+    () => (streaming ? proposalFromTokens(stream.tokens) : null),
+    [streaming, stream.tokens],
+  );
+  const fullProposal: ProposalView | null =
+    stream.proposal ?? (session?.status === "awaiting_user" ? (session.proposal ?? null) : null);
+  const revealed = useRevealedProposal(fullProposal, Boolean(stream.proposal));
 
   function recoverFrom(error: ApiError, sentence?: string) {
     const presentation = cookErrorPresentation(error.problem.code, error.problem.detail);
@@ -189,8 +201,17 @@ export function CookSessionView({ id }: { id: string }) {
   const failed = session.status === "failed";
   const errorCode = typeof session.error?.code === "string" ? session.error.code : undefined;
   const errorDetail = typeof session.error?.detail === "string" ? session.error.detail : undefined;
-  const attemptLabel =
-    session.attempt_count > 1 ? `Attempt ${session.attempt_count}` : null;
+  const attemptCount = stream.attempt ?? session.attempt_count;
+  const attemptLabel = attemptCount > 1 ? `Attempt ${attemptCount}` : null;
+  const cardProposal = revealed ?? partial;
+  const cardReady = Boolean(
+    cardProposal && (cardProposal.title || cardProposal.lines?.length || cardProposal.steps?.length),
+  );
+  const showRail = streaming || stream.nodes.length > 0;
+  const previous =
+    streaming && session.proposal && session.attempt_count > 0 ? session.proposal : null;
+  const adjustment = stream.violations.at(-1)?.message;
+  const streamError = stream.error;
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
@@ -198,12 +219,63 @@ export function CookSessionView({ id }: { id: string }) {
         “{session.sentence}”
       </p>
 
-      {session.status === "running" ? <ProposalSkeleton /> : null}
+      {showRail || streaming || session.status === "awaiting_user" ? (
+        <div
+          className={
+            showRail
+              ? "grid items-start gap-6 lg:grid-cols-[11.5rem_minmax(0,1fr)]"
+              : undefined
+          }
+        >
+          {showRail ? (
+            <ProgressRail
+              nodes={stream.nodes}
+              settled={session.status === "awaiting_user"}
+              note={
+                stream.phase === "polling"
+                  ? "The live update dropped. Checking the proposal."
+                  : adjustment
+                    ? `Adjusted: ${adjustment}`
+                    : null
+              }
+            />
+          ) : null}
+          <div>
+            {previous && previous.title !== cardProposal?.title ? (
+              <p className="mb-3 text-sm text-muted-foreground opacity-60">
+                Previous: {previous.title}
+              </p>
+            ) : null}
+            {cardReady && cardProposal ? (
+              <ProposalCard
+                key={`${attemptCount}-${cardProposal.title ?? "partial"}`}
+                proposal={cardProposal}
+                pantry={pantry}
+                attemptLabel={attemptLabel}
+                stale={stale}
+                staleMessage={staleOverride ?? undefined}
+                busy={busy}
+                showActions={session.status === "awaiting_user"}
+                onConfirm={() => {
+                  if (!session.proposal_etag) return;
+                  setActionError(null);
+                  confirm.mutate(session.proposal_etag);
+                }}
+                onRevise={(note) => revise.mutate(note)}
+                onAbandon={() => abandon.mutate()}
+                onRepropose={() => revise.mutate(REPROPOSE_NOTE)}
+              />
+            ) : streaming ? (
+              <ProposalSkeleton />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {failed ? (
         <CookErrorCard
-          code={actionError?.problem.code ?? errorCode}
-          detail={actionError?.problem.detail ?? errorDetail}
+          code={actionError?.problem.code ?? streamError?.code ?? errorCode}
+          detail={actionError?.problem.detail ?? streamError?.detail ?? errorDetail}
           pending={busy}
           onRecover={() => {
             if (actionError) recoverFrom(actionError, session.sentence);
@@ -225,39 +297,18 @@ export function CookSessionView({ id }: { id: string }) {
         />
       ) : null}
 
-      {session.status === "awaiting_user" && session.proposal ? (
-        <>
-          {actionError && actionError.problem.code !== "stale_proposal" ? (
-            <div className="mb-4">
-              <CookErrorCard
-                code={actionError.problem.code}
-                detail={actionError.problem.detail}
-                pending={busy}
-                onRecover={() => recoverFrom(actionError, session.sentence)}
-              />
-            </div>
-          ) : null}
-          <ProposalCard
-            key={`${session.attempt_count}-${session.proposal.title}`}
-            proposal={session.proposal}
-            pantry={pantry}
-            attemptLabel={attemptLabel}
-            stale={stale}
-            staleMessage={staleOverride ?? undefined}
-            busy={busy}
-            onConfirm={() => {
-              if (!session.proposal_etag) return;
-              setActionError(null);
-              confirm.mutate(session.proposal_etag);
-            }}
-            onRevise={(note) => revise.mutate(note)}
-            onAbandon={() => abandon.mutate()}
-            onRepropose={() => revise.mutate(REPROPOSE_NOTE)}
+      {session.status === "awaiting_user" && actionError && actionError.problem.code !== "stale_proposal" ? (
+        <div className="mt-4">
+          <CookErrorCard
+            code={actionError.problem.code}
+            detail={actionError.problem.detail}
+            pending={busy}
+            onRecover={() => recoverFrom(actionError, session.sentence)}
           />
-        </>
+        </div>
       ) : null}
 
-      {session.status === "awaiting_user" && !session.proposal && !failed ? (
+      {session.status === "awaiting_user" && !session.proposal && !cardProposal && !failed ? (
         <CookErrorCard
           detail="The session is waiting, but the proposal didn't come back."
           pending={busy}
