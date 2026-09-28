@@ -45,6 +45,7 @@ class CookConfirmRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     proposal_etag: str = Field(min_length=64, max_length=64)
+    acknowledge_expired: bool = False
 
 
 class ResumePayload(BaseModel):
@@ -77,3 +78,15 @@ class CookSessionRead(BaseModel):
     created_at: str
     updated_at: str
     expires_at: str
+
+
+class CookSessionSummary(BaseModel):
+    """Index row for the unfinished-proposal pill. The full proposal stays on GET by id."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    status: Literal["running", "awaiting_user", "committed", "abandoned", "failed"]
+    sentence: str
+    attempt_count: int
+    updated_at: str
