@@ -16,7 +16,10 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8787
 
-    cors_origins: list[str] = ["http://localhost:3939"]
+    cors_origins: list[str] = [
+        "http://localhost:3939",
+        "http://127.0.0.1:3939",
+    ]
 
 
 settings = Settings()
