@@ -1,4 +1,6 @@
-import { addDaysISO } from "@/lib/pantry";
+import { format } from "date-fns";
+
+import { addDaysISO, parseISODate } from "@/lib/pantry";
 
 export type ChipItem = {
   id: string;
@@ -63,6 +65,14 @@ export function suggestionChips(items: ChipItem[], today: string): Suggestion[] 
     .slice(0, 3);
 }
 
+export function rateLimitMessage(retryAfter: number | null | undefined): string {
+  if (retryAfter === null || retryAfter === undefined || !Number.isFinite(retryAfter) || retryAfter <= 0) {
+    return "The kitchen is busy. Try again in a moment.";
+  }
+  const seconds = Math.max(1, Math.ceil(retryAfter));
+  return `The kitchen is busy. Try again in ${seconds}s.`;
+}
+
 const KNOWN_ERRORS: Record<string, { message: string; action: string }> = {
   llm_timeout: { message: "The chef took too long.", action: "Try again" },
   llm_rate_limited: {
@@ -81,6 +91,11 @@ const KNOWN_ERRORS: Record<string, { message: string; action: string }> = {
     action: "Re-propose",
   },
   interrupted_by_restart: { message: "This session was interrupted.", action: "Start again" },
+  checkpoint_unreadable: { message: "This session was interrupted.", action: "Start again" },
+  expired_unacknowledged: {
+    message: "This proposal uses food that's already expired.",
+    action: "Re-propose",
+  },
   empty_pantry: {
     message: "The pantry is empty. Add items before cooking.",
     action: "Add items",
@@ -94,13 +109,36 @@ const KNOWN_ERRORS: Record<string, { message: string; action: string }> = {
 export function cookErrorPresentation(
   code: string | undefined,
   detail: string | undefined,
+  retryAfter?: number | null,
 ): { message: string; action: string } {
+  if (code === "llm_rate_limited") {
+    return { message: rateLimitMessage(retryAfter), action: "Try again" };
+  }
   const known = code ? KNOWN_ERRORS[code] : undefined;
   if (known) return known;
   return {
     message: detail?.trim() || "The cook didn't come back with a meal.",
     action: "Start over",
   };
+}
+
+export function expiredAcknowledgement(
+  lines: { kind: string; item_id?: string }[],
+  pantry: Record<string, { name: string; expires_on?: string | null }>,
+  today: string,
+): string | null {
+  const parts: string[] = [];
+  for (const line of lines) {
+    if (line.kind !== "use" || !line.item_id) continue;
+    const item = pantry[line.item_id];
+    if (!item?.expires_on || item.expires_on >= today) continue;
+    const weekday = format(parseISODate(item.expires_on), "EEEE");
+    parts.push(`the ${item.name.toLocaleLowerCase()} expired ${weekday}`);
+  }
+  if (parts.length === 0) return null;
+  if (parts.length === 1) return `I know ${parts[0]}`;
+  const last = parts[parts.length - 1];
+  return `I know ${parts.slice(0, -1).join(", ")} and ${last}`;
 }
 
 export function shoppingListText(
