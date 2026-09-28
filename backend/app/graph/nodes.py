@@ -1,23 +1,29 @@
 from __future__ import annotations
 
+import contextvars
 import difflib
 import json
+import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from decimal import Decimal
 from typing import Any
 
+import structlog
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.models import Item
 from app.db.repositories import ItemRepository
 from app.domain.commit import commit_cooked_meal
 from app.domain.errors import DomainError
 from app.domain.expiry import is_expired
 from app.domain.units import Dimension, Quantity, Unit
+from app.graph.llm import llm_mode
 from app.graph.prompts import PARSE_SYSTEM, PROPOSE_SYSTEM
 from app.graph.state import MAX_AUTO_REPAIR, MAX_TOTAL_ATTEMPTS, CookState
 from app.schemas.cook import ResumePayload
@@ -31,12 +37,43 @@ from app.schemas.llm import (
 
 SessionFactory = Callable[[], Session]
 _CONTEXT_MARKER = "COOK_CONTEXT_JSON:\n"
+_NODE_WALL_SECONDS = 60.0
+_log = structlog.get_logger()
 
 
 class StructuredOutputError(Exception):
     def __init__(self, detail: str) -> None:
         self.detail = detail
         super().__init__(detail)
+
+
+class LlmCallError(Exception):
+    def __init__(self, code: str, detail: str, extra: dict[str, Any] | None = None) -> None:
+        self.code = code
+        self.detail = detail
+        self.extra = extra or {}
+        super().__init__(detail)
+
+
+def _llm_payload(exc: LlmCallError) -> dict[str, Any]:
+    return {"code": exc.code, "detail": exc.detail, **exc.extra}
+
+
+def _log_node(node: str, state: CookState, started: float, **fields: Any) -> None:
+    from app.observability import request_id_var
+
+    model = "fake" if llm_mode() == "fake" else settings.llm_model
+    _log.info(
+        "cook_node",
+        request_id=request_id_var.get() or None,
+        session_id=state.get("session_id"),
+        node=node,
+        attempt=len(state.get("attempts") or []),
+        duration_ms=round((time.perf_counter() - started) * 1000, 1),
+        llm_model=model,
+        tokens_in=fields.get("tokens_in"),
+        tokens_out=fields.get("tokens_out"),
+    )
 
 
 def load_pantry(state: CookState, session_factory: SessionFactory) -> dict[str, Any]:
@@ -54,17 +91,23 @@ def parse_sentence(state: CookState, llm: BaseChatModel) -> dict[str, Any]:
         SystemMessage(content=PARSE_SYSTEM),
         HumanMessage(content=_context_message(state)),
     ]
+    started = time.perf_counter()
     try:
         constraints = _invoke_structured(llm, Constraints, messages)
     except StructuredOutputError as exc:
-        return {
+        result = {
             "error": {
                 "code": "llm_output_invalid",
                 "detail": "The proposal came back garbled.",
                 "cause": exc.detail,
             }
         }
-    return {"constraints": constraints.model_dump(mode="json"), "error": None}
+    except LlmCallError as exc:
+        result = {"error": _llm_payload(exc)}
+    else:
+        result = {"constraints": constraints.model_dump(mode="json"), "error": None}
+    _log_node("parse_sentence", state, started)
+    return result
 
 
 def propose_meal(state: CookState, llm: BaseChatModel) -> dict[str, Any]:
@@ -72,10 +115,11 @@ def propose_meal(state: CookState, llm: BaseChatModel) -> dict[str, Any]:
         SystemMessage(content=PROPOSE_SYSTEM),
         HumanMessage(content=_context_message(state)),
     ]
+    started = time.perf_counter()
     try:
         proposal = _invoke_structured(llm, MealProposal, messages)
     except StructuredOutputError as exc:
-        return {
+        result = {
             "proposal": None,
             "error": {
                 "code": "llm_output_invalid",
@@ -83,7 +127,12 @@ def propose_meal(state: CookState, llm: BaseChatModel) -> dict[str, Any]:
                 "cause": exc.detail,
             },
         }
-    return {"proposal": proposal.model_dump(mode="json"), "error": None}
+    except LlmCallError as exc:
+        result = {"proposal": None, "error": _llm_payload(exc)}
+    else:
+        result = {"proposal": proposal.model_dump(mode="json"), "error": None}
+    _log_node("propose_meal", state, started)
+    return result
 
 
 def validate_proposal(state: CookState) -> dict[str, Any]:
@@ -362,21 +411,103 @@ def _context_message(state: CookState) -> str:
     return _CONTEXT_MARKER + json.dumps(context, sort_keys=True, default=str)
 
 
-def _invoke_structured(llm: BaseChatModel, schema: type[BaseModel], messages: list[Any]) -> Any:
+def classify_llm_exception(exc: BaseException) -> dict[str, Any] | None:
+    """Map a provider error onto a cook error code. Schema mistakes return None."""
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
+    name = type(exc).__name__.lower().replace("_", "")
+    if isinstance(exc, TimeoutError) or "timeout" in name or status in {408, 504}:
+        return {"code": "llm_timeout", "detail": "The chef took too long."}
+    if status == 429 or "ratelimit" in name:
+        extra: dict[str, Any] = {}
+        retry_after = _retry_after(exc)
+        if retry_after is not None:
+            extra["retry_after"] = retry_after
+        return {
+            "code": "llm_rate_limited",
+            "detail": "The kitchen is busy. Try again in a moment.",
+            "extra": extra,
+        }
+    if status in {401, 403} or "authentication" in name or "permissiondenied" in name:
+        _log.error("llm_auth_failed", error_type=type(exc).__name__)
+        return {"code": "llm_unavailable", "detail": "Can't reach the chef right now."}
+    return None
+
+
+def _retry_after(exc: BaseException) -> int | None:
+    raw = getattr(exc, "retry_after", None)
+    headers = getattr(exc, "headers", None)
+    if raw is None and headers is None:
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None) if response is not None else None
+    if raw is None and headers is not None and hasattr(headers, "get"):
+        raw = headers.get("retry-after") or headers.get("Retry-After")
+    try:
+        value = int(float(str(raw)))
+    except (TypeError, ValueError):
+        return None
+    if value < 0:
+        return None
+    return value
+
+
+def _invoke_once(llm: BaseChatModel, schema: type[BaseModel], messages: list[Any]) -> Any:
+    try:
+        return llm.with_structured_output(schema).invoke(messages)
+    except LlmCallError:
+        raise
+    except Exception as exc:
+        classified = classify_llm_exception(exc)
+        if classified is None:
+            raise
+        raise LlmCallError(
+            str(classified["code"]),
+            str(classified["detail"]),
+            classified.get("extra") if isinstance(classified.get("extra"), dict) else None,
+        ) from exc
+
+
+def _invoke_structured(
+    llm: BaseChatModel,
+    schema: type[BaseModel],
+    messages: list[Any],
+    *,
+    wall_seconds: float = _NODE_WALL_SECONDS,
+) -> Any:
+    """Call the model, retrying schema mistakes. Timeouts and 429s are not retried.
+
+    The node gives up after ``wall_seconds`` even if the client is still retrying.
+    """
+    deadline = time.monotonic() + wall_seconds
     last = "The model returned nothing."
     current = list(messages)
     for _ in range(3):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise LlmCallError("llm_timeout", "The chef took too long.")
+        pool = ThreadPoolExecutor(max_workers=1)
+        context = contextvars.copy_context()
         try:
-            result = llm.with_structured_output(schema).invoke(current)
-            if result is None:
-                raise ValueError("empty structured output")
-            if isinstance(result, schema):
-                return result
-            return schema.model_validate(result)
-        except Exception as exc:
-            last = str(exc)
-            current = [
-                *messages,
-                HumanMessage(content="your last output was not valid JSON matching the schema"),
-            ]
+            future = pool.submit(context.run, _invoke_once, llm, schema, current)
+            try:
+                result = future.result(timeout=remaining)
+                if result is None:
+                    raise ValueError("empty structured output")
+                if isinstance(result, schema):
+                    return result
+                return schema.model_validate(result)
+            except TimeoutError:
+                raise LlmCallError("llm_timeout", "The chef took too long.") from None
+            except LlmCallError:
+                raise
+            except Exception as exc:
+                last = str(exc)
+                current = [
+                    *messages,
+                    HumanMessage(content="your last output was not valid JSON matching the schema"),
+                ]
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
     raise StructuredOutputError(last)

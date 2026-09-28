@@ -96,4 +96,9 @@
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+
+  ::selection {
+    background: oklch(0.86 0.04 75);
+    color: oklch(0.22 0.01 60);
+  }
 }
