@@ -7,6 +7,7 @@ import { emptyDraft, type ItemDraft } from "@/lib/quick-add";
 
 export type QuickAddHandle = {
   focusName: () => void;
+  selectName: () => void;
   prefill: (draft: ItemDraft) => void;
 };
 
@@ -22,6 +23,13 @@ export function QuickAdd({ ref, onSubmit }: QuickAddProps) {
   useImperativeHandle(ref, () => ({
     focusName: () => {
       document.getElementById("quick-add-name")?.focus();
+    },
+    selectName: () => {
+      const input = document.getElementById("quick-add-name");
+      if (input instanceof HTMLInputElement) {
+        input.focus();
+        input.select();
+      }
     },
     prefill: (draft: ItemDraft) => {
       setInitial(draft);
