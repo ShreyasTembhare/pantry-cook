@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
-from sqlalchemy import asc, desc, nullslast, select
+from sqlalchemy import asc, desc, func, nullslast, select
 from sqlalchemy.orm import Session
 
 from app.db.models import CookSession, Item, Meal
@@ -10,10 +11,12 @@ from app.domain.errors import (
     DuplicateItemError,
     ItemNotFoundError,
     MealNotFoundError,
+    QuantityLimitError,
     SessionNotFoundError,
     StaleVersionError,
+    UnitDimensionMismatchError,
 )
-from app.domain.units import Dimension, Quantity, Unit
+from app.domain.units import MAX_BASE_QUANTITY, Dimension, Quantity, Unit
 from app.schemas.items import ItemCreate, ItemUpdate, normalise_name_key
 
 
@@ -123,6 +126,21 @@ class ItemRepository:
         self._db.delete(item)
         self._db.flush()
 
+    def add_quantity(self, item_id: str, quantity: Decimal, unit: Unit) -> Item:
+        """Add ``quantity`` onto an existing item when the dimension matches."""
+        item = self.get(item_id)
+        incoming = Quantity(quantity, unit)
+        if incoming.dimension.value != item.dimension:
+            raise UnitDimensionMismatchError(item.dimension, incoming.dimension.value)
+        current = Quantity(Decimal(str(item.quantity_base)), unit.base_unit)
+        total = current + incoming.to_base()
+        if total.amount > MAX_BASE_QUANTITY:
+            raise QuantityLimitError()
+        item.quantity_base = float(total.amount)
+        item.version += 1
+        self._db.flush()
+        return item
+
     def _to_display_quantity(self, item: Item) -> Quantity:
         return Quantity.from_base(
             item.quantity_base,
@@ -175,6 +193,29 @@ class CookSessionRepository:
         if row is None:
             raise SessionNotFoundError(session_id)
         return row
+
+    def list(self, status: str) -> list[CookSession]:
+        stmt = (
+            select(CookSession)
+            .where(CookSession.status == status)
+            .order_by(desc(CookSession.updated_at), desc(CookSession.id))
+        )
+        return list(self._db.execute(stmt).scalars().all())
+
+    def list_finished_before(self, before: datetime) -> list[CookSession]:
+        stmt = (
+            select(CookSession)
+            .where(
+                CookSession.status.in_(("abandoned", "committed", "failed")),
+                CookSession.updated_at <= before,
+            )
+            .order_by(asc(CookSession.updated_at), asc(CookSession.id))
+        )
+        return list(self._db.execute(stmt).scalars().all())
+
+    def count_status(self, status: str) -> int:
+        stmt = select(func.count()).select_from(CookSession).where(CookSession.status == status)
+        return int(self._db.execute(stmt).scalar_one())
 
     def touch(self, row: CookSession) -> CookSession:
         row.updated_at = _now()
