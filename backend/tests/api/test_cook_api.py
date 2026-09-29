@@ -154,6 +154,41 @@ class TestCookApi:
         leeks_now = cook.client.get(f"/api/items/{leeks['id']}")
         assert Decimal(leeks_now.json()["quantity"]) == Decimal("150")
 
+    def test_undo_restores_quantities_once(self, cook: SimpleNamespace) -> None:
+        leeks = _add(cook.client, "Leeks", "300", "g")
+        started = _start(cook.client)
+        confirmed = cook.client.post(
+            f"/api/cook/{started['id']}/confirm",
+            json={"proposal_etag": started["proposal_etag"]},
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        meal = confirmed.json()
+        assert meal["status"] == "cooked"
+
+        after_cook = cook.client.get(f"/api/items/{leeks['id']}")
+        assert Decimal(after_cook.json()["quantity"]) == Decimal("150")
+
+        undone = cook.client.post(f"/api/meals/{meal['id']}/undo")
+        assert undone.status_code == 200, undone.text
+        assert undone.json()["status"] == "undone"
+        restored = cook.client.get(f"/api/items/{leeks['id']}")
+        assert Decimal(restored.json()["quantity"]) == Decimal("300")
+
+        again = cook.client.post(f"/api/meals/{meal['id']}/undo")
+        assert again.status_code == 200, again.text
+        assert again.json()["status"] == "undone"
+        still = cook.client.get(f"/api/items/{leeks['id']}")
+        assert Decimal(still.json()["quantity"]) == Decimal("300")
+
+        cooked = cook.client.get("/api/meals?status=cooked")
+        assert cooked.json() == []
+        listed = cook.client.get("/api/meals?status=undone")
+        assert [row["id"] for row in listed.json()] == [meal["id"]]
+
+        missing = cook.client.post("/api/meals/missing/undo")
+        assert missing.status_code == 404
+        assert missing.json()["code"] == "meal_not_found"
+
     def test_abandon_is_idempotent(self, cook: SimpleNamespace) -> None:
         _add(cook.client, "Leeks", "300", "g")
         started = _start(cook.client)
