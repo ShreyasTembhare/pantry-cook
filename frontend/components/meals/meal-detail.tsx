@@ -195,7 +195,7 @@ export function MealDetail({ id }: { id: string }) {
           <h2 className="font-serif text-[1.75rem] leading-none tracking-tight">{meal.title}</h2>
           <p className="mt-2 text-sm text-muted-foreground tabular-nums">
             {meal.servings} {meal.servings === 1 ? "serving" : "servings"}
-            {when ? ` \u00b7 ${when}` : ""}
+            {when ? ` · ${when}` : ""}
           </p>
         </div>
         {meal.status === "cooked" ? (
@@ -321,7 +321,7 @@ export function MealDetail({ id }: { id: string }) {
                         <span className={cn(done && "text-muted-foreground line-through")}>
                           {name}
                           {line.missing_note ? (
-                            <span className="text-muted-foreground"> \u00b7 {line.missing_note}</span>
+                            <span className="text-muted-foreground"> · {line.missing_note}</span>
                           ) : null}
                         </span>
                       </label>
