@@ -4,6 +4,7 @@ import {
   cookErrorPresentation,
   expiredAcknowledgement,
   rateLimitMessage,
+  revisionHistory,
   shoppingListText,
   suggestionChips,
 } from "@/lib/cook";
@@ -76,5 +77,41 @@ describe("cook errors and shopping lists", () => {
         { kind: "missing", missing_name: "lemon", missing_note: null },
       ]),
     ).toBe("olive oil — a splash\nlemon");
+  });
+});
+
+describe("revision history", () => {
+  it("orders attempts oldest first and keeps the note on the revision", () => {
+    const entries = revisionHistory([
+      {
+        attempt_no: 2,
+        trigger: "user_revision",
+        user_note: "fewer steps",
+        proposal: {
+          title: "Leeks and eggs",
+          steps: ["Cook everything in one pan and serve."],
+        },
+      },
+      {
+        attempt_no: 1,
+        trigger: "initial",
+        user_note: null,
+        proposal: { title: "Leeks and eggs", steps: ["Prep the leeks."] },
+      },
+    ]);
+
+    expect(entries.map((entry) => entry.attemptNo)).toEqual([1, 2]);
+    expect(entries[0]).toMatchObject({
+      triggerLabel: "First proposal",
+      title: "Leeks and eggs",
+      opening: "Prep the leeks.",
+      note: null,
+    });
+    expect(entries[1]).toMatchObject({
+      triggerLabel: "Revised",
+      title: "Leeks and eggs",
+      opening: "Cook everything in one pan and serve.",
+      note: "fewer steps",
+    });
   });
 });

@@ -206,6 +206,13 @@ const cookErrorSchema = z
   })
   .passthrough();
 
+export const proposalAttemptSchema = z.object({
+  attempt_no: z.number().int(),
+  trigger: z.enum(["initial", "auto_repair", "user_revision"]),
+  user_note: z.string().nullable(),
+  proposal: proposalSchema.nullable(),
+});
+
 export const cookSessionSchema = z.object({
   id: z.string(),
   status: z.enum(["running", "awaiting_user", "committed", "abandoned", "failed"]),
@@ -214,6 +221,10 @@ export const cookSessionSchema = z.object({
   proposal: proposalSchema.nullable(),
   proposal_etag: z.string().nullable(),
   violations: z.array(violationSchema).optional().transform((value) => value ?? []),
+  attempts: z
+    .array(proposalAttemptSchema)
+    .optional()
+    .transform((value) => value ?? []),
   meal_id: z.string().nullable(),
   error: cookErrorSchema.nullable(),
   stale: z.boolean().optional().transform((value) => Boolean(value)),
