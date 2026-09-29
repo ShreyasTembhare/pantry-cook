@@ -40,6 +40,7 @@ export function MealsList() {
           [
             ["cooked", "Cooked"],
             ["proposed", "Proposed"],
+            ["undone", "Undone"],
           ] as const
         ).map(([value, label]) => (
           <Button
@@ -84,7 +85,9 @@ export function MealsList() {
           <p className="text-sm leading-relaxed text-muted-foreground">
             {status === "cooked"
               ? "No meals yet. Cook something."
-              : "Nothing is sitting here as a proposal. An unfinished one stays on Cook until you confirm."}
+              : status === "undone"
+                ? "No meals have been undone."
+                : "Nothing is sitting here as a proposal. An unfinished one stays on Cook until you confirm."}
           </p>
           {status === "cooked" ? (
             <Button asChild className="mt-4 h-11 lg:h-9">
