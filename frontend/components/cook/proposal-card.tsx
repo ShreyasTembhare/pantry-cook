@@ -5,6 +5,8 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { expiredAcknowledgement } from "@/lib/cook";
+import { localISODate } from "@/lib/pantry";
 import { depletionRatio } from "@/lib/quantity";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +26,7 @@ export type PantryAmount = {
   name: string;
   quantity: string;
   unit: string;
+  expires_on?: string | null;
 };
 
 type ProposalCardProps = {
@@ -34,7 +37,8 @@ type ProposalCardProps = {
   staleMessage?: string;
   busy?: boolean;
   showActions?: boolean;
-  onConfirm: () => void;
+  today?: string;
+  onConfirm: (acknowledgeExpired: boolean) => void;
   onRevise: (note: string) => void;
   onAbandon: () => void;
   onRepropose?: () => void;
@@ -58,6 +62,7 @@ export function ProposalCard({
   staleMessage = "Your pantry changed since this was proposed.",
   busy = false,
   showActions = true,
+  today,
   onConfirm,
   onRevise,
   onAbandon,
@@ -71,6 +76,15 @@ export function ProposalCard({
   const [abandoning, setAbandoning] = useState(false);
 
   const lines = proposal.lines ?? [];
+  const todayISO = today ?? localISODate(new Date());
+  const acknowledgement = expiredAcknowledgement(lines, pantry, todayISO);
+  const [ackState, setAckState] = useState({ text: acknowledgement, checked: false });
+  if (ackState.text !== acknowledgement) {
+    setAckState({ text: acknowledgement, checked: false });
+  }
+  const acknowledged = ackState.checked;
+  const needsAck = acknowledgement !== null;
+  const confirmBlocked = stale || (needsAck && !acknowledged);
   const steps = proposal.steps ?? [];
   const useLines = lines.filter((line) => line.kind === "use");
   const missingLines = lines.filter((line) => line.kind === "missing");
@@ -93,9 +107,9 @@ export function ProposalCard({
         return;
       }
       if (isTypingTarget(event.target) || busy) return;
-      if ((event.key === "c" || event.key === "C") && !stale && !revising) {
+      if ((event.key === "c" || event.key === "C") && !confirmBlocked && !revising) {
         event.preventDefault();
-        onConfirm();
+        onConfirm(needsAck);
       }
       if ((event.key === "r" || event.key === "R") && !revising) {
         event.preventDefault();
@@ -106,7 +120,7 @@ export function ProposalCard({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, onConfirm, revising, showActions, stale]);
+  }, [busy, confirmBlocked, needsAck, onConfirm, revising, showActions]);
 
   function submitRevision() {
     const trimmed = note.trim();
@@ -310,12 +324,26 @@ export function ProposalCard({
               </div>
             </form>
           ) : (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex flex-col gap-3">
+              {acknowledgement && !stale ? (
+                <label className="flex items-start gap-2 text-sm leading-relaxed">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-4 accent-primary"
+                    checked={acknowledged}
+                    onChange={(event) =>
+                      setAckState({ text: acknowledgement, checked: event.target.checked })
+                    }
+                  />
+                  <span>{acknowledgement}</span>
+                </label>
+              ) : null}
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <Button
                 type="button"
                 className="h-11 lg:h-9"
-                disabled={busy || stale}
-                onClick={onConfirm}
+                disabled={busy || confirmBlocked}
+                onClick={() => onConfirm(needsAck)}
               >
                 {busy ? "Cooking" : "Confirm"}
               </Button>
@@ -364,6 +392,7 @@ export function ProposalCard({
                   Abandon
                 </Button>
               )}
+              </div>
             </div>
           )}
         </footer>

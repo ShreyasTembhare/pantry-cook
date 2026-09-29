@@ -28,6 +28,14 @@ import { useRevealedProposal } from "@/lib/use-revealed-proposal";
 
 const REPROPOSE_NOTE = "The pantry changed. Propose again from what's there now.";
 
+function retrySeconds(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  return null;
+}
+
 export function CookSessionView({ id }: { id: string }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -66,7 +74,8 @@ export function CookSessionView({ id }: { id: string }) {
   });
 
   const confirm = useMutation({
-    mutationFn: (etag: string) => confirmCook(id, etag),
+    mutationFn: (input: { etag: string; acknowledgeExpired: boolean }) =>
+      confirmCook(id, input.etag, { acknowledgeExpired: input.acknowledgeExpired }),
     onSuccess: (meal) => {
       void queryClient.invalidateQueries({ queryKey: ["items"] });
       void queryClient.invalidateQueries({ queryKey: ["meals"] });
@@ -80,6 +89,10 @@ export function CookSessionView({ id }: { id: string }) {
       router.push(`/meals/${meal.id}`);
     },
     onError: (error) => {
+      if (error instanceof ApiError && error.problem.code === "expired_unacknowledged") {
+        toast.error(error.problem.detail);
+        return;
+      }
       if (error instanceof ApiError && error.problem.code === "stale_proposal") {
         const reason = error.problem.extra?.reason;
         setStaleOverride(
@@ -194,7 +207,12 @@ export function CookSessionView({ id }: { id: string }) {
 
   const pantry: Record<string, PantryAmount> = {};
   for (const item of itemsQuery.data ?? []) {
-    pantry[item.id] = { name: item.name, quantity: item.quantity, unit: item.unit };
+    pantry[item.id] = {
+      name: item.name,
+      quantity: item.quantity,
+      unit: item.unit,
+      expires_on: item.expires_on,
+    };
   }
 
   const stale = Boolean(staleOverride) || session.stale;
@@ -212,6 +230,7 @@ export function CookSessionView({ id }: { id: string }) {
     streaming && session.proposal && session.attempt_count > 0 ? session.proposal : null;
   const adjustment = stream.violations.at(-1)?.message;
   const streamError = stream.error;
+  const retryAfter = retrySeconds(actionError?.problem.extra?.retry_after ?? session.error?.retry_after);
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
@@ -256,10 +275,10 @@ export function CookSessionView({ id }: { id: string }) {
                 staleMessage={staleOverride ?? undefined}
                 busy={busy}
                 showActions={session.status === "awaiting_user"}
-                onConfirm={() => {
+                onConfirm={(acknowledgeExpired) => {
                   if (!session.proposal_etag) return;
                   setActionError(null);
-                  confirm.mutate(session.proposal_etag);
+                  confirm.mutate({ etag: session.proposal_etag, acknowledgeExpired });
                 }}
                 onRevise={(note) => revise.mutate(note)}
                 onAbandon={() => abandon.mutate()}
@@ -274,8 +293,10 @@ export function CookSessionView({ id }: { id: string }) {
 
       {failed ? (
         <CookErrorCard
+          key={`${errorCode ?? "failed"}-${retryAfter ?? "now"}`}
           code={actionError?.problem.code ?? streamError?.code ?? errorCode}
           detail={actionError?.problem.detail ?? streamError?.detail ?? errorDetail}
+          retryAfter={retryAfter}
           pending={busy}
           onRecover={() => {
             if (actionError) recoverFrom(actionError, session.sentence);
@@ -300,8 +321,10 @@ export function CookSessionView({ id }: { id: string }) {
       {session.status === "awaiting_user" && actionError && actionError.problem.code !== "stale_proposal" ? (
         <div className="mt-4">
           <CookErrorCard
+            key={`${actionError.problem.code}-${retryAfter ?? "now"}`}
             code={actionError.problem.code}
             detail={actionError.problem.detail}
+            retryAfter={retryAfter}
             pending={busy}
             onRecover={() => recoverFrom(actionError, session.sentence)}
           />
