@@ -7,6 +7,8 @@ import {
   expiredAcknowledgement,
   rateLimitMessage,
   revisionHistory,
+  shoppingListFilename,
+  shoppingListMarkdown,
   shoppingListText,
   suggestionChips,
 } from "@/lib/cook";
@@ -88,6 +90,22 @@ describe("cook errors and shopping lists", () => {
         { kind: "missing", missing_name: "lemon", missing_note: null },
       ]),
     ).toBe("olive oil — a splash\nlemon");
+  });
+
+  it("writes the same missing lines as a markdown checklist", () => {
+    const lines = [
+      { kind: "use", item_name: "Chicken" },
+      { kind: "missing", missing_name: "olive oil", missing_note: "a splash" },
+      { kind: "missing", missing_name: "lemon", missing_note: null },
+    ];
+    expect(shoppingListMarkdown({ title: "Leeks and eggs", servings: 2 }, lines)).toBe(
+      "# Leeks and eggs\n\nShopping list · 2 servings\n\n- [ ] olive oil — a splash\n- [ ] lemon\n",
+    );
+    expect(shoppingListMarkdown({ title: "Leeks and eggs", servings: 2 }, lines)).not.toContain(
+      "Chicken",
+    );
+    expect(shoppingListFilename("Leeks and eggs", "txt")).toBe("leeks-and-eggs-shopping-list.txt");
+    expect(shoppingListFilename("Leeks and eggs", "md")).toBe("leeks-and-eggs-shopping-list.md");
   });
 });
 
