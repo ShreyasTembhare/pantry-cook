@@ -207,6 +207,35 @@ class TestCookApi:
         assert Decimal(current.json()["quantity"]) == Decimal("100")
         assert cook.client.get("/api/meals").json() == []
 
+    def test_revision_history_keeps_the_note_and_both_proposals(
+        self, cook: SimpleNamespace
+    ) -> None:
+        _add(cook.client, "Leeks", "300", "g")
+        started = _start(cook.client)
+        assert [item["attempt_no"] for item in started["attempts"]] == [1]
+        assert started["attempts"][0]["trigger"] == "initial"
+        assert started["attempts"][0]["user_note"] is None
+        first_title = started["attempts"][0]["proposal"]["title"]
+
+        revised = cook.client.post(
+            f"/api/cook/{started['id']}/revise",
+            json={"note": "fewer steps"},
+        )
+        assert revised.status_code == 200, revised.text
+        attempts = revised.json()["attempts"]
+        assert [item["attempt_no"] for item in attempts] == [1, 2]
+        assert attempts[0]["trigger"] == "initial"
+        assert attempts[0]["proposal"]["title"] == first_title
+        assert attempts[0]["user_note"] is None
+        assert attempts[1]["trigger"] == "user_revision"
+        assert attempts[1]["user_note"] == "fewer steps"
+        assert attempts[1]["proposal"]["title"]
+        assert attempts[1]["proposal"]["steps"] == ["Cook everything in one pan and serve."]
+
+        loaded = cook.client.get(f"/api/cook/{started['id']}")
+        assert loaded.status_code == 200
+        assert loaded.json()["attempts"][1]["user_note"] == "fewer steps"
+
     def test_reload_reads_the_checkpoint(self, cook: SimpleNamespace) -> None:
         _add(cook.client, "Leeks", "300", "g")
         started = _start(cook.client)
@@ -230,6 +259,10 @@ class TestCookApi:
         body = _start(cook.client)
         assert body["attempt_count"] == 2
         assert body["status"] == "awaiting_user"
+        assert [item["trigger"] for item in body["attempts"]] == ["initial", "auto_repair"]
+        assert body["attempts"][0]["proposal"]["title"] == "Too much leek"
+        assert body["attempts"][0]["user_note"] is None
+        assert body["attempts"][1]["proposal"]["title"]
 
     def test_could_not_satisfy(self, cook: SimpleNamespace) -> None:
         leeks = _add(cook.client, "Leeks", "300", "g")
