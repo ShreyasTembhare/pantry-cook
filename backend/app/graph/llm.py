@@ -18,9 +18,11 @@ from pydantic import BaseModel, Field, PrivateAttr
 from app.config import Settings
 from app.config import settings as default_settings
 from app.domain.expiry import is_expired
+from app.domain.quick_add import rules_from_messages
 from app.domain.units import Dimension, Quantity, Unit
 from app.graph.prompts import EXPIRING_COOK_NOTE
 from app.schemas.llm import Constraints, MealProposal, ProposedMissingLine, ProposedUseLine
+from app.schemas.quick_add import DraftPantrySentence
 
 _CONTEXT_MARKER = "COOK_CONTEXT_JSON:\n"
 
@@ -186,6 +188,8 @@ def _rules_for(schema: Any, messages: Any) -> BaseModel:
         return _rules_constraints(context)
     if schema is MealProposal:
         return _rules_proposal(context)
+    if schema is DraftPantrySentence:
+        return rules_from_messages(messages)
     raise TypeError(f"FakeMealModel cannot fill schema {schema!r}")
 
 
