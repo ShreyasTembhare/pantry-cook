@@ -270,6 +270,60 @@ class TestCookApi:
         assert current.status_code == 200
         assert Decimal(current.json()["quantity"]) == Decimal("0")
 
+    def test_expired_use_needs_an_acknowledgement(self, cook: SimpleNamespace) -> None:
+        _add(cook.client, "Yoghurt", "400", "g", expires_on="2020-01-06")
+        started = _start(cook.client, "something warm with the yoghurt")
+        assert started["status"] == "awaiting_user"
+        blocked = cook.client.post(
+            f"/api/cook/{started['id']}/confirm",
+            json={"proposal_etag": started["proposal_etag"]},
+        )
+        assert blocked.status_code == 409
+        body = blocked.json()
+        assert body["code"] == "expired_unacknowledged"
+        assert body["extra"]["expired_items"][0]["name"] == "Yoghurt"
+        still = cook.client.get("/api/items")
+        assert Decimal(still.json()[0]["quantity"]) == Decimal("400")
+
+        confirmed = cook.client.post(
+            f"/api/cook/{started['id']}/confirm",
+            json={"proposal_etag": started["proposal_etag"], "acknowledge_expired": True},
+        )
+        assert confirmed.status_code == 200, confirmed.text
+
+    def test_timeout_and_rate_limit_are_problem_details(self, cook: SimpleNamespace) -> None:
+        class RateLimitError(Exception):
+            def __init__(self) -> None:
+                super().__init__("busy")
+                self.status_code = 429
+                self.headers = {"retry-after": "8"}
+
+        _add(cook.client, "Rice", "500", "g")
+        cook.llm.script.append(TimeoutError("slow"))
+        timed_out = cook.client.post(
+            "/api/cook/start", json={"sentence": "something warm with the rice"}
+        )
+        assert timed_out.status_code == 504
+        assert timed_out.json()["code"] == "llm_timeout"
+
+        cook.llm.script.append(RateLimitError())
+        limited = cook.client.post(
+            "/api/cook/start", json={"sentence": "something warm with the rice"}
+        )
+        assert limited.status_code == 429
+        assert limited.json()["code"] == "llm_rate_limited"
+        assert limited.headers["retry-after"] == "8"
+
+    def test_health_names_the_checkpointer_and_pending_cooks(self, cook: SimpleNamespace) -> None:
+        health = cook.client.get("/api/health")
+        assert health.status_code == 200
+        body = health.json()
+        assert body["db"] == "ok"
+        assert body["checkpointer"] == "ok"
+        assert body["llm"] == "fake"
+        assert body["pending_sessions"] == 0
+        assert body["status"] == "healthy"
+
     def test_missing_session_and_meal(self, cook: SimpleNamespace) -> None:
         missing = cook.client.get("/api/cook/does-not-exist")
         assert missing.status_code == 404

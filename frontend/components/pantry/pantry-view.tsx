@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { DuplicatePrompt } from "@/components/pantry/duplicate-prompt";
 import { ItemForm } from "@/components/pantry/item-form";
 import { PantryRow } from "@/components/pantry/pantry-row";
 import { PantrySkeleton } from "@/components/pantry/pantry-skeleton";
@@ -22,11 +23,13 @@ import {
   deleteItem,
   fieldErrorsFromProblem,
   listItems,
+  mergeItem,
   updateItem,
   type Item,
 } from "@/lib/api";
 import { groupItems, localISODate } from "@/lib/pantry";
-import { SAMPLE_DRAFTS, draftFromItem, type ItemDraft } from "@/lib/quick-add";
+import { dimensionOf } from "@/lib/quantity";
+import { SAMPLE_DRAFTS, draftFromItem, emptyDraft, type ItemDraft } from "@/lib/quick-add";
 
 class DraftFieldError extends Error {
   fields: Partial<Record<string, string>>;
@@ -60,6 +63,7 @@ export function PantryView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [sheetItem, setSheetItem] = useState<Item | null>(null);
   const [settlingId, setSettlingId] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<{ draft: ItemDraft; existing: Item } | null>(null);
 
   const itemsQuery = useQuery({
     queryKey: ["items"],
@@ -148,6 +152,22 @@ export function PantryView() {
     },
   });
 
+  const mergeMutation = useMutation({
+    mutationFn: (input: { item: Item; draft: ItemDraft }) =>
+      mergeItem(input.item.id, { quantity: input.draft.quantity, unit: input.draft.unit }),
+    onSuccess: async (item) => {
+      await invalidate();
+      setConflict(null);
+      setSettlingId(item.id);
+      window.setTimeout(() => setSettlingId((current) => (current === item.id ? null : current)), 400);
+      quickAddRef.current?.prefill(emptyDraft());
+      toast.success(`Added to ${item.name}`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError ? error.problem.detail : "Couldn't add to that item.");
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (item: Item) => deleteItem(item.id),
     onSuccess: async (_void, item) => {
@@ -164,7 +184,16 @@ export function PantryView() {
   async function handleCreate(draft: ItemDraft) {
     try {
       await createMutation.mutateAsync(draft);
+      setConflict(null);
     } catch (error) {
+      if (error instanceof ApiError && error.problem.code === "duplicate_item") {
+        const existingId = error.problem.extra?.existing_id;
+        const existing = (itemsQuery.data ?? []).find((item) => item.id === existingId);
+        if (existing) {
+          setConflict({ draft, existing });
+          throw new Error("duplicate");
+        }
+      }
       throwIfFields(error);
     }
   }
@@ -205,6 +234,20 @@ export function PantryView() {
       </header>
 
       <QuickAdd ref={quickAddRef} onSubmit={handleCreate} />
+      {conflict ? (
+        <DuplicatePrompt
+          name={conflict.existing.name}
+          quantity={conflict.draft.quantity}
+          unit={conflict.draft.unit}
+          sameDimension={dimensionOf(conflict.draft.unit) === conflict.existing.dimension}
+          pending={mergeMutation.isPending}
+          onMerge={() => mergeMutation.mutate({ item: conflict.existing, draft: conflict.draft })}
+          onRename={() => {
+            setConflict(null);
+            quickAddRef.current?.selectName();
+          }}
+        />
+      ) : null}
 
       <div className="mt-6">
         {showError ? (

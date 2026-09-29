@@ -102,6 +102,33 @@ describe("ProposalCard", () => {
     expect(screen.getByRole("button", { name: "Confirm" })).toBeInTheDocument();
   });
 
+  it("asks before confirming an expired ingredient", async () => {
+    const user = userEvent.setup();
+    const { onConfirm } = renderCard({
+      today: "2026-09-28",
+      pantry: {
+        chicken: { name: "Yoghurt", quantity: "400", unit: "g", expires_on: "2026-09-21" },
+      },
+      proposal: {
+        title: "Yoghurt on a plate",
+        servings: 2,
+        lines: [{ kind: "use", item_id: "chicken", quantity: "200", unit: "g" }],
+        steps: ["Stir it."],
+      },
+    });
+
+    expect(
+      screen.getByRole("checkbox", { name: "I know the yoghurt expired Monday" }),
+    ).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
+    await user.keyboard("c");
+    expect(onConfirm).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("checkbox", { name: "I know the yoghurt expired Monday" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(onConfirm).toHaveBeenCalledWith(true);
+  });
+
   it("shows a stale banner and disables confirm until a re-propose", async () => {
     const user = userEvent.setup();
     const { onConfirm, onRepropose } = renderCard({ stale: true });
