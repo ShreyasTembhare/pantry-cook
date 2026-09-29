@@ -12,14 +12,15 @@ AttemptTrigger = Literal["initial", "auto_repair", "user_revision"]
 class CookStartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    sentence: str = Field(min_length=3, max_length=500)
+    sentence: str = Field(default="", max_length=500)
     defer: bool = False
 
     @field_validator("sentence")
     @classmethod
-    def sentence_not_blank(cls, value: str) -> str:
+    def sentence_length(cls, value: str) -> str:
+        """A blank sentence means cook what's expiring. Anything else needs 3-500 characters."""
         stripped = value.strip()
-        if len(stripped) < 3:
+        if stripped and len(stripped) < 3:
             raise ValueError("Sentence must be at least 3 characters")
         if len(stripped) > 500:
             raise ValueError("Sentence must be at most 500 characters")

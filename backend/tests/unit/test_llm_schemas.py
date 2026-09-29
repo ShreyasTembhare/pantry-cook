@@ -74,6 +74,8 @@ class TestConstraints:
 class TestCookRequests:
     def test_sentence_bounds(self) -> None:
         assert CookStartRequest(sentence="food").sentence == "food"
+        assert CookStartRequest(sentence="").sentence == ""
+        assert CookStartRequest(sentence="   ").sentence == ""
         with pytest.raises(ValidationError):
             CookStartRequest(sentence="ab")
         with pytest.raises(ValidationError):

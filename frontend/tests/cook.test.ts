@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  EXPIRING_COOK_LABEL,
   cookErrorPresentation,
+  displayCookSentence,
   expiredAcknowledgement,
   rateLimitMessage,
   revisionHistory,
@@ -33,6 +35,15 @@ describe("suggestion chips", () => {
     expect(
       suggestionChips([{ id: "1", name: "Salt", quantity: "0", expires_on: "2026-09-29" }], today),
     ).toEqual([]);
+  });
+});
+
+describe("cook what's expiring", () => {
+  it("names a blank sentence", () => {
+    expect(displayCookSentence("")).toBe("Cook what's expiring");
+    expect(displayCookSentence("   ")).toBe("Cook what's expiring");
+    expect(displayCookSentence("something warm")).toBe("something warm");
+    expect(EXPIRING_COOK_LABEL).toBe("What's expiring");
   });
 });
 
@@ -76,7 +87,7 @@ describe("cook errors and shopping lists", () => {
         { kind: "missing", missing_name: "olive oil", missing_note: "a splash" },
         { kind: "missing", missing_name: "lemon", missing_note: null },
       ]),
-    ).toBe("olive oil — a splash\nlemon");
+    ).toBe("olive oil \u2014 a splash\nlemon");
   });
 });
 
