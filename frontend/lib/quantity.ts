@@ -20,6 +20,44 @@ export function dimensionOf(unit: string): "mass" | "volume" | "count" | null {
   return null;
 }
 
+export type NotedQuantity = {
+  quantity: string;
+  unit: "g" | "kg" | "ml" | "L" | "count";
+};
+
+function noteQuantityPattern(): RegExp {
+  return /(\d+(?:[.,]\d+)?)\s*(kg|ml|count|g|l)\b/gi;
+}
+
+export function parseQuantityNote(note: string | null | undefined): NotedQuantity | null {
+  if (!note) return null;
+  const matches = [...note.matchAll(noteQuantityPattern())];
+  if (matches.length !== 1) return null;
+  const rawAmount = matches[0][1]?.replace(",", ".");
+  const rawUnit = matches[0][2]?.toLowerCase();
+  if (!rawAmount || !rawUnit) return null;
+  const numeric = Number(rawAmount);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  const unit: NotedQuantity["unit"] = rawUnit === "l" ? "L" : (rawUnit as NotedQuantity["unit"]);
+  if (unit === "count" && !Number.isInteger(numeric)) return null;
+  if (unit !== "count" && numeric < 0.01) return null;
+  return { quantity: trimAmount(numeric), unit };
+}
+
+export function knownPurchase(line: {
+  quantity?: string | null;
+  unit?: NotedQuantity["unit"] | null;
+  missing_note?: string | null;
+}): NotedQuantity | null {
+  if (line.quantity && line.unit) {
+    const numeric = Number(line.quantity);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return { quantity: trimAmount(numeric), unit: line.unit };
+    }
+  }
+  return parseQuantityNote(line.missing_note);
+}
+
 export function trimAmount(value: number): string {
   if (!Number.isFinite(value)) return "";
   const rounded = Math.round((value + Number.EPSILON) * 100) / 100;

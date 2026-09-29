@@ -69,6 +69,52 @@ class MealNotFoundError(DomainError):
         )
 
 
+class MealLineNotFoundError(DomainError):
+    def __init__(self, line_id: str) -> None:
+        super().__init__(
+            code="meal_line_not_found",
+            status=404,
+            detail="That shopping line is not on this meal.",
+            extra={"line_id": line_id},
+        )
+
+
+class QuantityRequiredError(DomainError):
+    def __init__(self) -> None:
+        super().__init__(
+            code="quantity_required",
+            status=422,
+            detail="This line has no quantity. Say how much you bought.",
+        )
+
+
+class MissingNameError(DomainError):
+    def __init__(self) -> None:
+        super().__init__(
+            code="missing_name",
+            status=422,
+            detail="That shopping line has no ingredient name.",
+        )
+
+
+class NonIntegerCountError(DomainError):
+    def __init__(self) -> None:
+        super().__init__(
+            code="non_integer_count",
+            status=422,
+            detail="Counts must be whole numbers.",
+        )
+
+
+class QuantityTooSmallError(DomainError):
+    def __init__(self) -> None:
+        super().__init__(
+            code="quantity_too_small",
+            status=422,
+            detail="Smallest amount is 0.01.",
+        )
+
+
 class MealNotCookedError(DomainError):
     def __init__(self, status: str) -> None:
         super().__init__(
