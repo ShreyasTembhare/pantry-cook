@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { cookErrorPresentation, shoppingListText, suggestionChips } from "@/lib/cook";
+import {
+  cookErrorPresentation,
+  expiredAcknowledgement,
+  rateLimitMessage,
+  shoppingListText,
+  suggestionChips,
+} from "@/lib/cook";
 
 const today = "2026-09-28";
 
@@ -36,6 +42,30 @@ describe("cook errors and shopping lists", () => {
       action: "Simplify sentence",
     });
     expect(cookErrorPresentation("stale_proposal", undefined).action).toBe("Re-propose");
+    expect(cookErrorPresentation("llm_rate_limited", undefined, 8)).toEqual({
+      message: "The kitchen is busy. Try again in 8s.",
+      action: "Try again",
+    });
+    expect(rateLimitMessage(null)).toBe("The kitchen is busy. Try again in a moment.");
+    expect(cookErrorPresentation("llm_timeout", "raw").message).toBe("The chef took too long.");
+    expect(cookErrorPresentation("interrupted_by_restart", undefined).action).toBe("Start again");
+  });
+
+  it("names the weekday on an expired ingredient", () => {
+    expect(
+      expiredAcknowledgement(
+        [{ kind: "use", item_id: "yoghurt" }],
+        { yoghurt: { name: "Yoghurt", expires_on: "2026-09-21" } },
+        "2026-09-28",
+      ),
+    ).toBe("I know the yoghurt expired Monday");
+    expect(
+      expiredAcknowledgement(
+        [{ kind: "use", item_id: "rice" }],
+        { rice: { name: "Rice", expires_on: "2026-10-02" } },
+        "2026-09-28",
+      ),
+    ).toBeNull();
   });
 
   it("copies missing lines as a shopping list", () => {

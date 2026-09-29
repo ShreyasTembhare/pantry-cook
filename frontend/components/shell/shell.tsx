@@ -123,7 +123,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </div>
           ) : null}
         </div>
-        <nav className="flex flex-1 flex-col gap-1 px-3 py-4">
+        <nav aria-label="Primary" className="flex flex-1 flex-col gap-1 px-3 py-4">
           {navItems.map((item) => (
             <NavLink key={item.href} {...item} active={isActive(item.href)} />
           ))}
@@ -148,7 +148,10 @@ export function Shell({ children }: { children: ReactNode }) {
 
         <main className="flex-1 overflow-y-auto">{children}</main>
 
-        <nav className="flex items-center justify-around border-t border-border bg-background pb-safe lg:hidden">
+        <nav
+          aria-label="Mobile"
+          className="flex items-center justify-around border-t border-border bg-background pb-safe lg:hidden"
+        >
           {navItems.map((item) => (
             <MobileNavLink key={item.href} {...item} active={isActive(item.href)} />
           ))}

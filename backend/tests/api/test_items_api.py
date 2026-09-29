@@ -201,6 +201,39 @@ class TestUpdateItem:
         assert resp.json()["code"] == "duplicate_item"
 
 
+class TestMergeItem:
+    def test_adds_onto_the_existing_quantity(self, client: TestClient) -> None:
+        created = client.post("/api/items", json={"name": "Rice", "quantity": "500", "unit": "g"})
+        assert created.status_code == 201
+        item_id = created.json()["id"]
+        merged = client.post(f"/api/items/{item_id}/merge", json={"quantity": "0.25", "unit": "kg"})
+        assert merged.status_code == 200, merged.text
+        body = merged.json()
+        assert body["quantity"] == "750.00"
+        assert body["unit"] == "g"
+        assert body["version"] == 2
+
+    def test_rejects_a_different_dimension(self, client: TestClient) -> None:
+        created = client.post("/api/items", json={"name": "Milk", "quantity": "1", "unit": "L"})
+        merged = client.post(
+            f"/api/items/{created.json()['id']}/merge",
+            json={"quantity": "200", "unit": "g"},
+        )
+        assert merged.status_code == 422
+        assert merged.json()["code"] == "unit_dimension_mismatch"
+
+    def test_rejects_a_quantity_past_the_limit(self, client: TestClient) -> None:
+        created = client.post(
+            "/api/items", json={"name": "Flour", "quantity": "1000000", "unit": "g"}
+        )
+        merged = client.post(
+            f"/api/items/{created.json()['id']}/merge",
+            json={"quantity": "1", "unit": "g"},
+        )
+        assert merged.status_code == 422
+        assert merged.json()["code"] == "quantity_limit"
+
+
 class TestDeleteItem:
     def test_delete_success(self, client: TestClient) -> None:
         create_resp = client.post(

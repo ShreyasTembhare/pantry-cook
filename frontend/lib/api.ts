@@ -202,6 +202,7 @@ const cookErrorSchema = z
   .object({
     code: z.string().optional(),
     detail: z.string().optional(),
+    retry_after: z.number().optional(),
   })
   .passthrough();
 
@@ -261,7 +262,9 @@ export const mealListItemSchema = mealSchema.omit({ steps: true, lines: true, co
 const healthSchema = z.object({
   status: z.string(),
   db: z.string(),
+  checkpointer: z.string().optional(),
   llm: z.string(),
+  pending_sessions: z.number().int().optional(),
 });
 
 export type CookSession = z.infer<typeof cookSessionSchema>;
@@ -306,10 +309,27 @@ export function reviseCook(
   });
 }
 
-export function confirmCook(id: string, proposalEtag: string): Promise<Meal> {
+export function confirmCook(
+  id: string,
+  proposalEtag: string,
+  options?: { acknowledgeExpired?: boolean },
+): Promise<Meal> {
   return request(`/api/cook/${id}/confirm`, mealSchema, {
     method: "POST",
-    body: JSON.stringify({ proposal_etag: proposalEtag }),
+    body: JSON.stringify({
+      proposal_etag: proposalEtag,
+      acknowledge_expired: Boolean(options?.acknowledgeExpired),
+    }),
+  });
+}
+
+export function mergeItem(
+  id: string,
+  input: { quantity: string; unit: Unit },
+): Promise<Item> {
+  return request(`/api/items/${encodeURIComponent(id)}/merge`, itemSchema, {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 }
 
