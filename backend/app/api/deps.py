@@ -55,3 +55,10 @@ def get_graph() -> Any:
     if _graph is None:
         return init_graph()
     return _graph
+
+
+def get_sentence_llm() -> Any:
+    """Offline chef unless a provider key is configured. Tests can override this."""
+    from app.graph.llm import get_llm
+
+    return get_llm()

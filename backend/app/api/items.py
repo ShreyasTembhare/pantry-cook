@@ -1,13 +1,27 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_sentence_llm
 from app.db.models import Item
 from app.db.repositories import ItemRepository
+from app.domain.quick_add import (
+    commit_parsed_items,
+    normalise_draft,
+    parse_pantry_sentence,
+    preview_lines,
+)
 from app.domain.units import Dimension, Quantity, Unit
 from app.schemas.items import ItemCreate, ItemMerge, ItemRead, ItemUpdate
+from app.schemas.quick_add import (
+    DraftPantrySentence,
+    PantrySentenceCommit,
+    PantrySentencePreview,
+    SentenceRequest,
+)
 
 router = APIRouter(prefix="/api/items", tags=["items"])
 
@@ -51,6 +65,33 @@ def list_items(
     repo = ItemRepository(db)
     items = repo.list(sort_by=sort)
     return [_item_to_read(i) for i in items]
+
+
+@router.post("/sentence/preview", response_model=PantrySentencePreview)
+def preview_sentence(
+    body: SentenceRequest,
+    db: Session = Depends(get_db),  # noqa: B008
+    llm: Any = Depends(get_sentence_llm),  # noqa: B008
+) -> PantrySentencePreview:
+    batch = parse_pantry_sentence(body.sentence, llm)
+    return preview_lines(db, body.sentence, batch)
+
+
+@router.post("/sentence", response_model=list[ItemRead])
+def save_sentence(
+    body: PantrySentenceCommit,
+    db: Session = Depends(get_db),  # noqa: B008
+) -> list[ItemRead]:
+    batch = normalise_draft(DraftPantrySentence(items=body.items))
+    try:
+        saved = commit_parsed_items(db, batch)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    for item in saved:
+        db.refresh(item)
+    return [_item_to_read(item) for item in saved]
 
 
 @router.get("/{item_id}", response_model=ItemRead)
