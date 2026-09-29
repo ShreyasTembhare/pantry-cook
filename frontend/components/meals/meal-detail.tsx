@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ApiError, buyMissingLine, getMeal, undoMeal, type MealLine, type Unit } from "@/lib/api";
-import { shoppingListText } from "@/lib/cook";
+import { displayCookSentence, shoppingListText } from "@/lib/cook";
 import { knownPurchase } from "@/lib/quantity";
 import { cn } from "@/lib/utils";
 
@@ -195,7 +195,7 @@ export function MealDetail({ id }: { id: string }) {
           <h2 className="font-serif text-[1.75rem] leading-none tracking-tight">{meal.title}</h2>
           <p className="mt-2 text-sm text-muted-foreground tabular-nums">
             {meal.servings} {meal.servings === 1 ? "serving" : "servings"}
-            {when ? ` · ${when}` : ""}
+            {when ? ` \u00b7 ${when}` : ""}
           </p>
         </div>
         {meal.status === "cooked" ? (
@@ -219,7 +219,7 @@ export function MealDetail({ id }: { id: string }) {
         </p>
       ) : null}
       <blockquote className="mt-4 max-w-prose border-l-2 border-border pl-3 text-sm leading-relaxed text-muted-foreground">
-        {meal.sentence}
+        {displayCookSentence(meal.sentence)}
       </blockquote>
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
@@ -321,7 +321,7 @@ export function MealDetail({ id }: { id: string }) {
                         <span className={cn(done && "text-muted-foreground line-through")}>
                           {name}
                           {line.missing_note ? (
-                            <span className="text-muted-foreground"> · {line.missing_note}</span>
+                            <span className="text-muted-foreground"> \u00b7 {line.missing_note}</span>
                           ) : null}
                         </span>
                       </label>
