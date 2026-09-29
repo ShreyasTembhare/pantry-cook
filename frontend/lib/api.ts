@@ -334,6 +334,43 @@ export function confirmCook(
   });
 }
 
+export const sentencePreviewLineSchema = z.object({
+  name: z.string(),
+  quantity: amountSchema,
+  unit: unitSchema,
+  action: z.enum(["create", "add"]),
+});
+
+export const sentencePreviewSchema = z.object({
+  sentence: z.string(),
+  items: z.array(sentencePreviewLineSchema).min(1),
+});
+
+export type SentencePreviewLine = z.infer<typeof sentencePreviewLineSchema>;
+export type SentencePreview = z.infer<typeof sentencePreviewSchema>;
+
+export function previewPantrySentence(sentence: string): Promise<SentencePreview> {
+  return request("/api/items/sentence/preview", sentencePreviewSchema, {
+    method: "POST",
+    body: JSON.stringify({ sentence }),
+  });
+}
+
+export function savePantrySentence(
+  items: { name: string; quantity: string; unit: Unit }[],
+): Promise<Item[]> {
+  return request("/api/items/sentence", z.array(itemSchema), {
+    method: "POST",
+    body: JSON.stringify({
+      items: items.map((item) => ({
+        name: item.name,
+        quantity: item.quantity,
+        unit: item.unit,
+      })),
+    }),
+  });
+}
+
 export function mergeItem(
   id: string,
   input: { quantity: string; unit: Unit },
