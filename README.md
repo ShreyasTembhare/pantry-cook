@@ -79,6 +79,8 @@ Revise with `POST /api/cook/<thread_id>/revise` and `{"note":"fewer steps"}`. Ab
 
 `POST /api/meals/<id>/undo` puts the quantities that meal subtracted back into the pantry in one transaction and marks the meal `undone`. Calling it again returns the undone meal and does not add those quantities a second time.
 
+`POST /api/meals/<id>/lines/<line_id>/bought` marks one missing line as bought. It creates the pantry item, or adds onto the item with the same name when the unit is the same dimension (`g`/`kg`, `ml`/`L`, or `count`). The line then leaves the shopping list. A line that already has a measure (`200 g` in the note, or a stored quantity) can be bought with `{}`. A line with no quantity returns `422 quantity_required` until the body includes `quantity` and `unit`. A different dimension returns `422 unit_dimension_mismatch` and the line stays. On the meal page, each shopping line has an “I bought this” button. When the line has no quantity, the page asks for one before adding it to the pantry.
+
 The cook graph pauses on a SqliteSaver checkpoint, so stopping the server after a proposal and starting it again still accepts confirm on the same thread id.
 
 ### Hardening
