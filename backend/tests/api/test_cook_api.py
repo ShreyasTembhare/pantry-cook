@@ -11,7 +11,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.deps import get_db, get_graph
-from app.db.models import Base
+from app.db.models import Base, Meal
 from app.graph.builder import build_graph
 from app.graph.llm import FakeMealModel
 from app.main import create_app
@@ -399,3 +399,144 @@ class TestCookApi:
         missing_meal = cook.client.get("/api/meals/does-not-exist")
         assert missing_meal.status_code == 404
         assert missing_meal.json()["code"] == "meal_not_found"
+
+
+def _cooked_meal(cook: SimpleNamespace) -> dict[str, object]:
+    _add(cook.client, "Leeks", "300", "g")
+    started = _start(cook.client)
+    confirmed = cook.client.post(
+        f"/api/cook/{started['id']}/confirm",
+        json={"proposal_etag": started["proposal_etag"]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    meal = confirmed.json()
+    assert isinstance(meal, dict)
+    return meal
+
+
+def _missing_line(meal: dict[str, object], name: str = "olive oil") -> dict[str, object]:
+    lines = meal["lines"]
+    assert isinstance(lines, list)
+    for line in lines:
+        assert isinstance(line, dict)
+        if line["kind"] == "missing" and line["missing_name"] == name:
+            return line
+    raise AssertionError(f"no missing line named {name}")
+
+
+def _set_note(cook: SimpleNamespace, meal_id: object, note: str) -> None:
+    session = cook.factory()
+    try:
+        meal = session.get(Meal, meal_id)
+        assert meal is not None
+        for line in meal.lines:
+            if line.kind == "missing":
+                line.missing_note = note
+        session.commit()
+    finally:
+        session.close()
+
+
+class TestBuyMissingLine:
+    def test_asks_then_creates_and_clears_the_line(self, cook: SimpleNamespace) -> None:
+        meal = _cooked_meal(cook)
+        line = _missing_line(meal)
+        meal_id = meal["id"]
+        line_id = line["id"]
+
+        asked = cook.client.post(f"/api/meals/{meal_id}/lines/{line_id}/bought", json={})
+        assert asked.status_code == 422
+        assert asked.json()["code"] == "quantity_required"
+        still = cook.client.get(f"/api/meals/{meal_id}")
+        assert _missing_line(still.json())["id"] == line_id
+
+        bought = cook.client.post(
+            f"/api/meals/{meal_id}/lines/{line_id}/bought",
+            json={"quantity": "250", "unit": "ml"},
+        )
+        assert bought.status_code == 200, bought.text
+        body = bought.json()
+        assert body["created"] is True
+        assert body["item_name"] == "olive oil"
+        assert body["unit"] == "ml"
+        assert Decimal(body["quantity"]) == Decimal("250")
+        assert all(row["id"] != line_id for row in body["meal"]["lines"])
+        assert body["meal"]["missing_count"] == 0
+
+        items = cook.client.get("/api/items")
+        oil = next(item for item in items.json() if item["name"] == "olive oil")
+        assert oil["unit"] == "ml"
+        assert Decimal(oil["quantity"]) == Decimal("250")
+        assert oil["id"] == body["item_id"]
+
+        again = cook.client.post(
+            f"/api/meals/{meal_id}/lines/{line_id}/bought",
+            json={"quantity": "250", "unit": "ml"},
+        )
+        assert again.status_code == 404
+        assert again.json()["code"] == "meal_line_not_found"
+        oil_again = cook.client.get(f"/api/items/{oil['id']}")
+        assert Decimal(oil_again.json()["quantity"]) == Decimal("250")
+
+    def test_note_quantity_increments_the_matching_item(self, cook: SimpleNamespace) -> None:
+        meal = _cooked_meal(cook)
+        created = _add(cook.client, "Olive Oil", "100", "g")
+        _set_note(cook, meal["id"], "about 0.2 kg")
+        line = _missing_line(meal)
+
+        bought = cook.client.post(f"/api/meals/{meal['id']}/lines/{line['id']}/bought", json={})
+        assert bought.status_code == 200, bought.text
+        body = bought.json()
+        assert body["created"] is False
+        assert body["item_id"] == created["id"]
+        assert body["item_name"] == "Olive Oil"
+        assert body["unit"] == "kg"
+
+        item = cook.client.get(f"/api/items/{created['id']}")
+        assert item.json()["unit"] == "g"
+        assert Decimal(item.json()["quantity"]) == Decimal("300")
+
+    def test_different_dimension_keeps_the_line(self, cook: SimpleNamespace) -> None:
+        meal = _cooked_meal(cook)
+        created = _add(cook.client, "olive oil", "2", "count")
+        line = _missing_line(meal)
+
+        rejected = cook.client.post(
+            f"/api/meals/{meal['id']}/lines/{line['id']}/bought",
+            json={"quantity": "200", "unit": "ml"},
+        )
+        assert rejected.status_code == 422
+        assert rejected.json()["code"] == "unit_dimension_mismatch"
+        still = cook.client.get(f"/api/meals/{meal['id']}")
+        assert _missing_line(still.json())["id"] == line["id"]
+        unchanged = cook.client.get(f"/api/items/{created['id']}")
+        assert Decimal(unchanged.json()["quantity"]) == Decimal("2")
+
+        bought = cook.client.post(
+            f"/api/meals/{meal['id']}/lines/{line['id']}/bought",
+            json={"quantity": "1", "unit": "count"},
+        )
+        assert bought.status_code == 200, bought.text
+        assert bought.json()["created"] is False
+        updated = cook.client.get(f"/api/items/{created['id']}")
+        assert Decimal(updated.json()["quantity"]) == Decimal("3")
+
+    def test_unknown_meal_and_a_count_fraction(self, cook: SimpleNamespace) -> None:
+        missing = cook.client.post("/api/meals/missing/lines/missing/bought", json={})
+        assert missing.status_code == 404
+        assert missing.json()["code"] == "meal_not_found"
+
+        meal = _cooked_meal(cook)
+        line = _missing_line(meal)
+        fraction = cook.client.post(
+            f"/api/meals/{meal['id']}/lines/{line['id']}/bought",
+            json={"quantity": "1.5", "unit": "count"},
+        )
+        assert fraction.status_code == 422
+        assert fraction.json()["code"] == "validation_failed"
+        half = cook.client.post(
+            f"/api/meals/{meal['id']}/lines/{line['id']}/bought",
+            json={"quantity": "200"},
+        )
+        assert half.status_code == 422
+        assert half.json()["code"] == "validation_failed"
