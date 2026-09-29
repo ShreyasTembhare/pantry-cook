@@ -162,7 +162,7 @@ export function shoppingListText(
     .filter((line) => line.kind === "missing")
     .map((line) => {
       const name = line.missing_name || line.item_name || "ingredient";
-      return line.missing_note ? `${name} \u2014 ${line.missing_note}` : name;
+      return line.missing_note ? `${name} — ${line.missing_note}` : name;
     })
     .join("\n");
 }
@@ -197,7 +197,7 @@ const TRIGGER_LABEL: Record<RevisionAttempt["trigger"], string> = {
 function shortLine(value: string): string {
   const trimmed = value.trim();
   if (trimmed.length <= 90) return trimmed;
-  return `${trimmed.slice(0, 87).trimEnd()}\u2026`;
+  return `${trimmed.slice(0, 87).trimEnd()}…`;
 }
 
 /** Checkpoint attempts, oldest first, with the note that produced a revision. */

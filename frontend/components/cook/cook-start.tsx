@@ -173,7 +173,7 @@ export function CookStart() {
             </p>
           ) : (
             <p className="mt-2 text-xs text-muted-foreground">
-              Leave it blank to cook what&apos;s expiring. Propose with \u2318/Ctrl + Enter.
+              Leave it blank to cook what&apos;s expiring. Propose with ⌘/Ctrl + Enter.
             </p>
           )}
           <div className="mt-4 flex flex-wrap gap-2">
