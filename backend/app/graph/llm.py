@@ -19,6 +19,7 @@ from app.config import Settings
 from app.config import settings as default_settings
 from app.domain.expiry import is_expired
 from app.domain.units import Dimension, Quantity, Unit
+from app.graph.prompts import EXPIRING_COOK_NOTE
 from app.schemas.llm import Constraints, MealProposal, ProposedMissingLine, ProposedUseLine
 
 _CONTEXT_MARKER = "COOK_CONTEXT_JSON:\n"
@@ -243,7 +244,8 @@ def _rules_constraints(context: dict[str, Any]) -> Constraints:
 def _rules_proposal(context: dict[str, Any]) -> MealProposal:
     sentence = str(context.get("sentence") or "")
     pantry = [row for row in context.get("pantry") or [] if isinstance(row, dict)]
-    constraints = context.get("constraints") if isinstance(context.get("constraints"), dict) else {}
+    raw_constraints = context.get("constraints")
+    constraints: dict[str, Any] = raw_constraints if isinstance(raw_constraints, dict) else {}
     notes = [str(note) for note in (context.get("notes") or [])]
     folded = sentence.casefold()
 
@@ -252,8 +254,11 @@ def _rules_proposal(context: dict[str, Any]) -> MealProposal:
     except (TypeError, ValueError):
         servings = 2
     servings = min(24, max(1, servings))
-    must = {str(item_id) for item_id in constraints.get("must_use_item_ids") or []}
-    ambiguous = bool(constraints.get("free_text_notes"))
+    must_ids = [str(item_id) for item_id in constraints.get("must_use_item_ids") or []]
+    must = set(must_ids)
+    note = str(constraints.get("free_text_notes") or "")
+    expiry_cook = note == EXPIRING_COOK_NOTE
+    ambiguous = bool(note)
 
     def usable(row: dict[str, Any]) -> bool:
         try:
@@ -266,7 +271,11 @@ def _rules_proposal(context: dict[str, Any]) -> MealProposal:
         return named or not is_expired(row.get("expires_on"), today=date.today())
 
     usable_rows = [row for row in pantry if usable(row)]
-    must_rows = [row for row in usable_rows if str(row.get("id")) in must]
+    by_id = {str(row.get("id")): row for row in usable_rows}
+    if expiry_cook:
+        must_rows = [by_id[item_id] for item_id in must_ids if item_id in by_id]
+    else:
+        must_rows = [row for row in usable_rows if str(row.get("id")) in must]
     others = [row for row in usable_rows if str(row.get("id")) not in must]
     chosen = (must_rows + others)[:3]
 
@@ -291,7 +300,9 @@ def _rules_proposal(context: dict[str, Any]) -> MealProposal:
 
     names = [str(row.get("name") or "ingredient") for row in chosen]
     title = _title(names)
-    if names and ambiguous:
+    if names and expiry_cook:
+        rationale = f"Uses {_name_list(names)} before they go off."
+    elif names and ambiguous:
         rationale = "Picked the soonest-expiring items because the request was open-ended."
     elif names:
         rationale = f"Uses the {names[0]} while it is still good."
@@ -318,6 +329,15 @@ def _rules_proposal(context: dict[str, Any]) -> MealProposal:
         steps=steps,
         rationale=rationale,
     )
+
+
+def _name_list(names: list[str]) -> str:
+    lowered = [name.lower() for name in names if name]
+    if len(lowered) <= 1:
+        return f"the {lowered[0]}" if lowered else "what's on hand"
+    if len(lowered) == 2:
+        return f"the {lowered[0]} and {lowered[1]}"
+    return f"the {', '.join(lowered[:-1])}, and {lowered[-1]}"
 
 
 def _title(names: list[str]) -> str:
