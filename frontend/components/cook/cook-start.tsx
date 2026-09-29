@@ -11,7 +11,12 @@ import { CookStartSkeleton } from "@/components/cook/cook-skeleton";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, listItems, startCook } from "@/lib/api";
-import { cookErrorPresentation, retriesSameSentence, suggestionChips } from "@/lib/cook";
+import {
+  EXPIRING_COOK_LABEL,
+  cookErrorPresentation,
+  retriesSameSentence,
+  suggestionChips,
+} from "@/lib/cook";
 import { localISODate } from "@/lib/pantry";
 
 const PLACEHOLDER = "something quick with the leeks and eggs before they turn";
@@ -53,11 +58,14 @@ export function CookStart() {
   const chips = suggestionChips(items, today);
   const empty = itemsQuery.isSuccess && items.length === 0;
   const trimmed = sentence.trim();
+  const blank = trimmed.length === 0;
   const tooShort = trimmed.length > 0 && trimmed.length < 3;
+  const canPropose = (blank || !tooShort) && trimmed.length <= 500;
 
   function submit(next = sentence) {
     const value = next.trim();
-    if (value.length < 3 || value.length > 500 || start.isPending || empty) return;
+    const blank = value.length === 0;
+    if ((!blank && value.length < 3) || value.length > 500 || start.isPending || empty) return;
     setSentence(value);
     setFailure(null);
     start.mutate(value);
@@ -83,7 +91,7 @@ export function CookStart() {
       <header className="mb-6">
         <h2 className="font-serif text-[1.75rem] leading-none tracking-tight">Cook</h2>
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
-          Say what you want. The proposal uses what is actually in the pantry.
+          Say what you want, or leave it blank to cook what&apos;s expiring.
         </p>
       </header>
 
@@ -161,35 +169,44 @@ export function CookStart() {
           />
           {tooShort ? (
             <p className="mt-2 text-xs text-destructive" role="alert">
-              A sentence needs at least 3 characters.
+              A sentence needs at least 3 characters, or leave it blank to cook what&apos;s expiring.
             </p>
           ) : (
-            <p className="mt-2 text-xs text-muted-foreground">Propose with ⌘/Ctrl + Enter.</p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Leave it blank to cook what&apos;s expiring. Propose with \u2318/Ctrl + Enter.
+            </p>
           )}
-          {chips.length > 0 ? (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {chips.map((chip) => (
-                <Button
-                  key={chip.sentence}
-                  type="button"
-                  variant="outline"
-                  className="h-11 lg:h-9"
-                  disabled={start.isPending}
-                  onClick={() => {
-                    setSentence(chip.sentence);
-                    setFailure(null);
-                    textareaRef.current?.focus();
-                  }}
-                >
-                  {chip.label}
-                </Button>
-              ))}
-            </div>
-          ) : null}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 lg:h-9"
+              disabled={start.isPending}
+              onClick={() => submit("")}
+            >
+              {EXPIRING_COOK_LABEL}
+            </Button>
+            {chips.map((chip) => (
+              <Button
+                key={chip.sentence}
+                type="button"
+                variant="outline"
+                className="h-11 lg:h-9"
+                disabled={start.isPending}
+                onClick={() => {
+                  setSentence(chip.sentence);
+                  setFailure(null);
+                  textareaRef.current?.focus();
+                }}
+              >
+                {chip.label}
+              </Button>
+            ))}
+          </div>
           <Button
             type="submit"
             className="mt-4 h-11 lg:h-9"
-            disabled={start.isPending || trimmed.length < 3 || trimmed.length > 500}
+            disabled={start.isPending || !canPropose}
           >
             {start.isPending ? "Proposing" : "Propose"}
           </Button>

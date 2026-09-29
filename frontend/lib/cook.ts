@@ -14,6 +14,15 @@ export type Suggestion = {
   sentence: string;
 };
 
+/** A blank cook sentence. The parse node turns it into the soonest-expiring items. */
+export const EXPIRING_COOK_SENTENCE = "";
+
+export const EXPIRING_COOK_LABEL = "What's expiring";
+
+export function displayCookSentence(sentence: string): string {
+  return sentence.trim() || "Cook what's expiring";
+}
+
 const SOON_DAYS = 3;
 
 export function suggestionChips(items: ChipItem[], today: string): Suggestion[] {
@@ -153,7 +162,7 @@ export function shoppingListText(
     .filter((line) => line.kind === "missing")
     .map((line) => {
       const name = line.missing_name || line.item_name || "ingredient";
-      return line.missing_note ? `${name} — ${line.missing_note}` : name;
+      return line.missing_note ? `${name} \u2014 ${line.missing_note}` : name;
     })
     .join("\n");
 }
@@ -188,7 +197,7 @@ const TRIGGER_LABEL: Record<RevisionAttempt["trigger"], string> = {
 function shortLine(value: string): string {
   const trimmed = value.trim();
   if (trimmed.length <= 90) return trimmed;
-  return `${trimmed.slice(0, 87).trimEnd()}…`;
+  return `${trimmed.slice(0, 87).trimEnd()}\u2026`;
 }
 
 /** Checkpoint attempts, oldest first, with the note that produced a revision. */
