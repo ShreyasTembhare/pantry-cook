@@ -9,6 +9,7 @@ import { ItemForm } from "@/components/pantry/item-form";
 import { PantryRow } from "@/components/pantry/pantry-row";
 import { PantrySkeleton } from "@/components/pantry/pantry-skeleton";
 import { QuickAdd, type QuickAddHandle } from "@/components/pantry/quick-add";
+import { SentenceAdd } from "@/components/pantry/sentence-add";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -233,6 +234,24 @@ export function PantryView() {
         </p>
       </header>
 
+      <div className="mb-6">
+        <SentenceAdd
+          onAdded={async (added) => {
+            await invalidate();
+            const first = added[0];
+            if (first) {
+              setSettlingId(first.id);
+              window.setTimeout(
+                () => setSettlingId((current) => (current === first.id ? null : current)),
+                400,
+              );
+            }
+            toast.success(
+              added.length === 1 ? `Added ${first?.name ?? "item"}` : `Added ${added.length} items`,
+            );
+          }}
+        />
+      </div>
       <QuickAdd ref={quickAddRef} onSubmit={handleCreate} />
       {conflict ? (
         <DuplicatePrompt
