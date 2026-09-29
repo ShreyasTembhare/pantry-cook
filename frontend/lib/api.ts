@@ -360,6 +360,32 @@ export function undoMeal(id: string): Promise<Meal> {
   return request(`/api/meals/${id}/undo`, mealSchema, { method: "POST" });
 }
 
+export const boughtLineSchema = z.object({
+  meal: mealSchema,
+  item_id: z.string(),
+  item_name: z.string(),
+  quantity: amountSchema,
+  unit: unitSchema,
+  created: z.boolean(),
+});
+
+export type BoughtLine = z.infer<typeof boughtLineSchema>;
+
+export function buyMissingLine(
+  mealId: string,
+  lineId: string,
+  input?: { quantity: string; unit: Unit },
+): Promise<BoughtLine> {
+  return request(
+    `/api/meals/${encodeURIComponent(mealId)}/lines/${encodeURIComponent(lineId)}/bought`,
+    boughtLineSchema,
+    {
+      method: "POST",
+      body: JSON.stringify(input ?? {}),
+    },
+  );
+}
+
 export function fieldErrorsFromProblem(problem: ProblemDetails): Partial<Record<string, string>> {
   const errors: Partial<Record<string, string>> = {};
   for (const error of problem.errors ?? []) {
