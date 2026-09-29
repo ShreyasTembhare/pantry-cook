@@ -12,14 +12,12 @@ const STEPS = [
 ] as const;
 
 function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(() => {
-    if (typeof window.matchMedia !== "function") return false;
-    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  });
+  const [reduced, setReduced] = useState(false);
   useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
     const apply = () => setReduced(query.matches);
+    apply();
     query.addEventListener("change", apply);
     return () => query.removeEventListener("change", apply);
   }, []);

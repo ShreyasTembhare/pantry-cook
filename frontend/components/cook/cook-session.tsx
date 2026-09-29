@@ -10,6 +10,7 @@ import { CookErrorCard } from "@/components/cook/cook-error";
 import { ProposalSkeleton } from "@/components/cook/cook-skeleton";
 import { ProgressRail } from "@/components/cook/progress-rail";
 import { ProposalCard, type PantryAmount, type ProposalView } from "@/components/cook/proposal-card";
+import { RevisionTimeline } from "@/components/cook/revision-timeline";
 import { Button } from "@/components/ui/button";
 import {
   abandonCook,
@@ -237,6 +238,8 @@ export function CookSessionView({ id }: { id: string }) {
       <p className="mb-4 max-w-prose text-sm leading-relaxed text-muted-foreground">
         “{session.sentence}”
       </p>
+
+      <RevisionTimeline attempts={session.attempts} />
 
       {showRail || streaming || session.status === "awaiting_user" ? (
         <div

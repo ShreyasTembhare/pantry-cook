@@ -161,3 +161,53 @@ export function shoppingListText(
 export function retriesSameSentence(action: string): boolean {
   return action === "Try again" || action === "Start again" || action === "Retry";
 }
+
+export const REVISION_ORDER_LABEL = "Oldest first";
+
+export type RevisionAttempt = {
+  attempt_no: number;
+  trigger: "initial" | "auto_repair" | "user_revision";
+  user_note: string | null;
+  proposal: { title: string; steps?: string[] } | null;
+};
+
+export type RevisionEntry = {
+  attemptNo: number;
+  triggerLabel: string;
+  title: string;
+  opening: string | null;
+  note: string | null;
+};
+
+const TRIGGER_LABEL: Record<RevisionAttempt["trigger"], string> = {
+  initial: "First proposal",
+  auto_repair: "Adjusted",
+  user_revision: "Revised",
+};
+
+function shortLine(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= 90) return trimmed;
+  return `${trimmed.slice(0, 87).trimEnd()}…`;
+}
+
+/** Checkpoint attempts, oldest first, with the note that produced a revision. */
+export function revisionHistory(attempts: RevisionAttempt[]): RevisionEntry[] {
+  return [...attempts]
+    .sort((a, b) => a.attempt_no - b.attempt_no)
+    .map((attempt) => {
+      const title = attempt.proposal?.title?.trim() || "No meal came back";
+      const firstStep = attempt.proposal?.steps?.find((step) => step.trim());
+      const note =
+        attempt.trigger === "user_revision" && attempt.user_note?.trim()
+          ? attempt.user_note.trim()
+          : null;
+      return {
+        attemptNo: attempt.attempt_no,
+        triggerLabel: TRIGGER_LABEL[attempt.trigger],
+        title,
+        opening: firstStep ? shortLine(firstStep) : null,
+        note,
+      };
+    });
+}
