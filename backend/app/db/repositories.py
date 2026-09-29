@@ -54,6 +54,9 @@ class ItemRepository:
             raise ItemNotFoundError(item_id)
         return item
 
+    def find_by_name_key(self, name_key: str) -> Item | None:
+        return self._db.execute(select(Item).where(Item.name_key == name_key)).scalar_one_or_none()
+
     def list(
         self,
         sort_by: str = "expires_on",
