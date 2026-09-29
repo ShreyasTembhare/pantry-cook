@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db
 from app.db.models import Meal, MealLine
 from app.db.repositories import MealRepository
+from app.domain.commit import undo_cooked_meal
 from app.domain.units import Dimension, Quantity, Unit
 from app.schemas.meals import MealLineRead, MealListItem, MealRead
 
@@ -78,4 +79,23 @@ def get_meal(
     db: Session = Depends(get_db),  # noqa: B008
 ) -> MealRead:
     meal = MealRepository(db).get(meal_id)
+    return meal_to_read(meal)
+
+
+@router.post("/{meal_id}/undo", response_model=MealRead)
+def undo_meal(
+    meal_id: str,
+    db: Session = Depends(get_db),  # noqa: B008
+) -> MealRead:
+    """Restore subtracted quantities and mark the meal undone.
+
+    Repeating the call returns the undone meal without adding the quantities again.
+    """
+    try:
+        meal = undo_cooked_meal(db, meal_id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(meal)
     return meal_to_read(meal)

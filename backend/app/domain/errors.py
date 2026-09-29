@@ -69,6 +69,25 @@ class MealNotFoundError(DomainError):
         )
 
 
+class MealNotCookedError(DomainError):
+    def __init__(self, status: str) -> None:
+        super().__init__(
+            code="meal_not_cooked",
+            status=409,
+            detail="Only a cooked meal can be undone.",
+            extra={"status": status},
+        )
+
+
+class UndoConflictError(DomainError):
+    def __init__(self, detail: str) -> None:
+        super().__init__(
+            code="undo_conflict",
+            status=409,
+            detail=detail,
+        )
+
+
 class SessionNotFoundError(DomainError):
     def __init__(self, session_id: str) -> None:
         super().__init__(
