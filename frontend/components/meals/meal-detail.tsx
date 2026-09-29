@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import Link from "next/link";
 import { useState } from "react";
@@ -8,7 +8,15 @@ import { toast } from "sonner";
 
 import { MealsSkeleton } from "@/components/cook/cook-skeleton";
 import { Button } from "@/components/ui/button";
-import { ApiError, getMeal, type MealLine } from "@/lib/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ApiError, getMeal, undoMeal, type MealLine } from "@/lib/api";
 import { shoppingListText } from "@/lib/cook";
 import { cn } from "@/lib/utils";
 
@@ -25,12 +33,31 @@ function lineAmount(line: MealLine): string {
 }
 
 export function MealDetail({ id }: { id: string }) {
+  const queryClient = useQueryClient();
   const mealQuery = useQuery({
     queryKey: ["meals", "detail", id],
     queryFn: () => getMeal(id),
   });
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [copying, setCopying] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const undo = useMutation({
+    mutationFn: () => undoMeal(id),
+    onSuccess: (meal) => {
+      queryClient.setQueryData(["meals", "detail", id], meal);
+      void queryClient.invalidateQueries({ queryKey: ["meals", "cooked"] });
+      void queryClient.invalidateQueries({ queryKey: ["meals", "proposed"] });
+      void queryClient.invalidateQueries({ queryKey: ["meals", "undone"] });
+      void queryClient.invalidateQueries({ queryKey: ["items"] });
+      setConfirmOpen(false);
+      toast.success("Undone. Pantry quantities restored.");
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof ApiError ? error.problem.detail : "Couldn't undo that meal.",
+      );
+    },
+  });
 
   if (mealQuery.isPending) {
     return (
@@ -100,14 +127,66 @@ export function MealDetail({ id }: { id: string }) {
           Meals
         </Link>
       </p>
-      <h2 className="mt-2 font-serif text-[1.75rem] leading-none tracking-tight">{meal.title}</h2>
-      <p className="mt-2 text-sm text-muted-foreground tabular-nums">
-        {meal.servings} {meal.servings === 1 ? "serving" : "servings"}
-        {when ? ` · ${when}` : ""}
-      </p>
+      <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="font-serif text-[1.75rem] leading-none tracking-tight">{meal.title}</h2>
+          <p className="mt-2 text-sm text-muted-foreground tabular-nums">
+            {meal.servings} {meal.servings === 1 ? "serving" : "servings"}
+            {when ? ` · ${when}` : ""}
+          </p>
+        </div>
+        {meal.status === "cooked" ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 lg:h-9"
+            onClick={() => setConfirmOpen(true)}
+          >
+            Undo
+          </Button>
+        ) : null}
+      </div>
+      {meal.status === "undone" ? (
+        <p
+          role="status"
+          className="mt-4 rounded-md border border-border bg-muted/70 px-3 py-3 text-sm leading-relaxed"
+        >
+          <span className="font-medium">Undone.</span> The quantities this meal used are back in
+          the pantry.
+        </p>
+      ) : null}
       <blockquote className="mt-4 max-w-prose border-l-2 border-border pl-3 text-sm leading-relaxed text-muted-foreground">
         {meal.sentence}
       </blockquote>
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Undo this meal?</DialogTitle>
+            <DialogDescription>
+              The pantry gets back what this meal used. Undoing again will not add those amounts a
+              second time.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 lg:h-9"
+              onClick={() => setConfirmOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="h-11 lg:h-9"
+              disabled={undo.isPending}
+              onClick={() => undo.mutate()}
+            >
+              {undo.isPending ? "Undoing" : "Undo meal"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="mt-8 grid gap-8 sm:grid-cols-2">
         <section aria-label="Used from pantry">
