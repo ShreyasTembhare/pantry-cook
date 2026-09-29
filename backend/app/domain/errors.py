@@ -228,6 +228,15 @@ class InsufficientQuantityError(DomainError):
         )
 
 
+class SentenceUnparsedError(DomainError):
+    def __init__(self, detail: str) -> None:
+        super().__init__(
+            code="sentence_unparsed",
+            status=422,
+            detail=detail,
+        )
+
+
 class CookFailedError(DomainError):
     def __init__(self, error: dict[str, Any]) -> None:
         code = str(error.get("code") or "cook_failed")
