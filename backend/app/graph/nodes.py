@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import structlog
@@ -24,7 +24,7 @@ from app.domain.errors import DomainError
 from app.domain.expiry import is_expired
 from app.domain.units import Dimension, Quantity, Unit
 from app.graph.llm import llm_mode
-from app.graph.prompts import PARSE_SYSTEM, PROPOSE_SYSTEM
+from app.graph.prompts import EXPIRING_COOK_NOTE, PARSE_SYSTEM, PROPOSE_SYSTEM
 from app.graph.state import MAX_AUTO_REPAIR, MAX_TOTAL_ATTEMPTS, CookState
 from app.schemas.cook import ResumePayload
 from app.schemas.llm import (
@@ -87,6 +87,18 @@ def load_pantry(state: CookState, session_factory: SessionFactory) -> dict[str, 
 
 
 def parse_sentence(state: CookState, llm: BaseChatModel) -> dict[str, Any]:
+    """Turn the sentence into constraints.
+
+    A blank sentence skips the model and pins the meal to the three pantry
+    items that expire soonest. A written sentence still goes through the model.
+    """
+    if not str(state.get("sentence") or "").strip():
+        started = time.perf_counter()
+        constraints = constraints_for_expiring(list(state.get("pantry_snapshot") or []))
+        result = {"constraints": constraints.model_dump(mode="json"), "error": None}
+        _log_node("parse_sentence", state, started)
+        return result
+
     messages = [
         SystemMessage(content=PARSE_SYSTEM),
         HumanMessage(content=_context_message(state)),
@@ -338,6 +350,22 @@ def find_violations(proposal: MealProposal, snapshot: list[dict[str, Any]]) -> l
     return violations
 
 
+def constraints_for_expiring(
+    snapshot: list[dict[str, Any]], *, today: date | None = None, limit: int = 3
+) -> Constraints:
+    """Constraints that prefer the soonest-expiring food still worth cooking.
+
+    Expired rows and empty jars are skipped. Items with no date are not forced
+    in; the propose step can still use them when nothing is dated.
+    """
+    chosen = _soonest_expiring(snapshot, today=today or date.today(), limit=limit)
+    return Constraints(
+        must_use_item_ids=[str(row["id"]) for row in chosen],
+        servings=2,
+        free_text_notes=EXPIRING_COOK_NOTE,
+    )
+
+
 def rows_for_prompt(snapshot: list[dict[str, Any]], sentence: str) -> list[dict[str, Any]]:
     """Drop zero-quantity rows unless the sentence names them.
 
@@ -397,6 +425,41 @@ def _row_from_item(item: Item) -> dict[str, Any]:
         version=item.version,
     )
     return row.model_dump(mode="json")
+
+
+def _soonest_expiring(
+    snapshot: list[dict[str, Any]], *, today: date, limit: int
+) -> list[dict[str, Any]]:
+    ranked: list[tuple[date, str, str, dict[str, Any]]] = []
+    for row in snapshot:
+        expires = _expiry_on(row.get("expires_on"))
+        if expires is None or is_expired(expires, today=today):
+            continue
+        if _base_quantity(row) <= 0:
+            continue
+        ranked.append(
+            (expires, str(row.get("name") or "").casefold(), str(row.get("id") or ""), row)
+        )
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]))
+    return [row for _expires, _name, _item_id, row in ranked[:limit]]
+
+
+def _expiry_on(value: object) -> date | None:
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _base_quantity(row: dict[str, Any]) -> Decimal:
+    try:
+        return Decimal(str(row.get("quantity_base") or "0"))
+    except (InvalidOperation, ValueError):
+        return Decimal("0")
 
 
 def _context_message(state: CookState) -> str:
