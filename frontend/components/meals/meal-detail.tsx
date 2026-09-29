@@ -278,20 +278,25 @@ export function MealDetail({ id }: { id: string }) {
         </section>
 
         <section aria-label="Shopping list">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">
               Shopping list
             </h3>
             {missing.length > 0 ? (
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 lg:h-8"
-                disabled={copying}
-                onClick={() => void copyList()}
-              >
-                Copy
-              </Button>
+              <div className="flex shrink-0 gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 lg:h-8"
+                  disabled={copying}
+                  onClick={() => void copyList()}
+                >
+                  Copy
+                </Button>
+                <Button asChild variant="outline" className="h-11 lg:h-8">
+                  <Link href={`/meals/${meal.id}/list`}>Print list</Link>
+                </Button>
+              </div>
             ) : null}
           </div>
           {missing.length === 0 ? (
