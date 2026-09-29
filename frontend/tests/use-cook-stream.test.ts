@@ -57,6 +57,7 @@ const session: CookSession = {
   status: "awaiting_user",
   sentence: "something warm with the leeks",
   attempt_count: 1,
+  attempts: [],
   proposal,
   proposal_etag: "a".repeat(64),
   violations: [],

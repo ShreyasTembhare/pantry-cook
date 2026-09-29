@@ -87,3 +87,44 @@ class TestItemRead:
         }
         item = ItemRead(**data)
         assert item.unit == Unit.G
+
+
+class TestProposalAttempts:
+    def test_reads_stored_attempts_and_skips_junk(self) -> None:
+        from app.schemas.cook import read_proposal_attempts
+
+        attempts = read_proposal_attempts(
+            {
+                "attempts": [
+                    "nope",
+                    {
+                        "attempt_no": 1,
+                        "trigger": "initial",
+                        "user_note": "  ",
+                        "proposal": {
+                            "title": "Leek skillet",
+                            "servings": 2,
+                            "lines": [{"kind": "missing", "name": "olive oil"}],
+                            "steps": ["Cook it."],
+                        },
+                    },
+                    {
+                        "trigger": "user_revision",
+                        "user_note": "  less spicy  ",
+                        "proposal": {"title": "no"},
+                    },
+                    {"attempt_no": True, "trigger": "mystery", "proposal": None},
+                ]
+            }
+        )
+        assert read_proposal_attempts({}) == []
+        assert read_proposal_attempts({"attempts": None}) == []
+        assert [item.attempt_no for item in attempts] == [1, 3, 4]
+        assert attempts[0].proposal is not None
+        assert attempts[0].proposal.title == "Leek skillet"
+        assert attempts[0].user_note is None
+        assert attempts[1].trigger == "user_revision"
+        assert attempts[1].user_note == "less spicy"
+        assert attempts[1].proposal is None
+        assert attempts[2].trigger == "initial"
+        assert attempts[2].proposal is None
