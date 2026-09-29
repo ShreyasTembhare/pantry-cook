@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from app.schemas.llm import MealProposal, Violation
+
+AttemptTrigger = Literal["initial", "auto_repair", "user_revision"]
 
 
 class CookStartRequest(BaseModel):
@@ -65,6 +67,17 @@ class ResumePayload(BaseModel):
         return self
 
 
+class ProposalAttemptRead(BaseModel):
+    """One proposal already stored on the cook graph, in checkpoint order."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    attempt_no: int = Field(ge=1)
+    trigger: AttemptTrigger
+    user_note: str | None = None
+    proposal: MealProposal | None = None
+
+
 class CookSessionRead(BaseModel):
     id: str
     status: Literal["running", "awaiting_user", "committed", "abandoned", "failed"]
@@ -73,6 +86,7 @@ class CookSessionRead(BaseModel):
     proposal: MealProposal | None = None
     proposal_etag: str | None = None
     violations: list[Violation] = Field(default_factory=list)
+    attempts: list[ProposalAttemptRead] = Field(default_factory=list)
     meal_id: str | None = None
     error: dict[str, Any] | None = None
     created_at: str
@@ -90,3 +104,50 @@ class CookSessionSummary(BaseModel):
     sentence: str
     attempt_count: int
     updated_at: str
+
+
+def read_proposal_attempts(values: dict[str, Any]) -> list[ProposalAttemptRead]:
+    """Read ``attempts`` from graph state. Junk rows are dropped, not fatal."""
+    raw_attempts = values.get("attempts")
+    if not isinstance(raw_attempts, list):
+        return []
+    parsed: list[ProposalAttemptRead] = []
+    for index, item in enumerate(raw_attempts, start=1):
+        if not isinstance(item, dict):
+            continue
+        note = item.get("user_note")
+        user_note = note.strip() if isinstance(note, str) else None
+        if not user_note:
+            user_note = None
+        raw_no = item.get("attempt_no")
+        attempt_no = (
+            raw_no
+            if isinstance(raw_no, int) and not isinstance(raw_no, bool) and raw_no >= 1
+            else index
+        )
+        parsed.append(
+            ProposalAttemptRead(
+                attempt_no=attempt_no,
+                trigger=_attempt_trigger(item.get("trigger")),
+                user_note=user_note,
+                proposal=_proposal_or_none(item.get("proposal")),
+            )
+        )
+    return parsed
+
+
+def _attempt_trigger(value: Any) -> AttemptTrigger:
+    if value == "auto_repair":
+        return "auto_repair"
+    if value == "user_revision":
+        return "user_revision"
+    return "initial"
+
+
+def _proposal_or_none(raw: Any) -> MealProposal | None:
+    if not isinstance(raw, dict) or not raw:
+        return None
+    try:
+        return MealProposal.model_validate(raw)
+    except ValidationError:
+        return None
