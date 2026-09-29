@@ -1,6 +1,7 @@
 """Non-streaming cook API: start, revise, confirm, abandon, stale proposals."""
 
 from collections.abc import Generator
+from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -90,6 +91,57 @@ class TestCookApi:
         response = cook.client.post("/api/cook/start", json={"sentence": "ab"})
         assert response.status_code == 422
         assert response.json()["code"] == "validation_failed"
+
+    def test_blank_sentence_on_an_empty_pantry(self, cook: SimpleNamespace) -> None:
+        response = cook.client.post("/api/cook/start", json={"sentence": ""})
+        assert response.status_code == 409
+        assert response.json()["code"] == "empty_pantry"
+
+    def test_blank_sentence_prefers_what_expires_soonest(self, cook: SimpleNamespace) -> None:
+        today = date.today()
+        yoghurt = _add(
+            cook.client,
+            "Yoghurt",
+            "200",
+            "g",
+            expires_on=(today - timedelta(days=2)).isoformat(),
+        )
+        rice = _add(
+            cook.client,
+            "Rice",
+            "500",
+            "g",
+            expires_on=(today + timedelta(days=12)).isoformat(),
+        )
+        spinach = _add(
+            cook.client,
+            "Spinach",
+            "180",
+            "g",
+            expires_on=(today + timedelta(days=1)).isoformat(),
+        )
+        milk = _add(
+            cook.client,
+            "Milk",
+            "1",
+            "L",
+            expires_on=(today + timedelta(days=3)).isoformat(),
+        )
+        eggs = _add(cook.client, "Eggs", "6", "count")
+        body = _start(cook.client, "   ")
+        assert body["status"] == "awaiting_user"
+        assert body["sentence"] == ""
+        use_ids = [line["item_id"] for line in body["proposal"]["lines"] if line["kind"] == "use"]
+        assert use_ids == [spinach["id"], milk["id"], rice["id"]]
+        assert yoghurt["id"] not in use_ids
+        assert eggs["id"] not in use_ids
+        assert "before they go off" in str(body["proposal"]["rationale"]).casefold()
+
+    def test_blank_sentence_still_cooks_when_nothing_is_dated(self, cook: SimpleNamespace) -> None:
+        rice = _add(cook.client, "Rice", "500", "g")
+        body = _start(cook.client, "")
+        use_ids = [line["item_id"] for line in body["proposal"]["lines"] if line["kind"] == "use"]
+        assert rice["id"] in use_ids
 
     def test_duplicate_names_still_rejected(self, cook: SimpleNamespace) -> None:
         _add(cook.client, "Rice", "500", "g")
