@@ -2,15 +2,22 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.db.models import Meal, MealLine
 from app.db.repositories import MealRepository
+from app.domain.buy import buy_missing_line
 from app.domain.commit import undo_cooked_meal
 from app.domain.units import Dimension, Quantity, Unit
-from app.schemas.meals import MealLineRead, MealListItem, MealRead
+from app.schemas.meals import (
+    BoughtMissingRead,
+    BuyMissingRequest,
+    MealLineRead,
+    MealListItem,
+    MealRead,
+)
 
 router = APIRouter(prefix="/api/meals", tags=["meals"])
 
@@ -99,3 +106,38 @@ def undo_meal(
         raise
     db.refresh(meal)
     return meal_to_read(meal)
+
+
+@router.post("/{meal_id}/lines/{line_id}/bought", response_model=BoughtMissingRead)
+def buy_meal_line(
+    meal_id: str,
+    line_id: str,
+    body: BuyMissingRequest = Body(default_factory=BuyMissingRequest),  # noqa: B008
+    db: Session = Depends(get_db),  # noqa: B008
+) -> BoughtMissingRead:
+    """Add the missing ingredient to the pantry and drop it from the shopping list.
+
+    Send a quantity and unit when the line does not already have one.
+    """
+    try:
+        bought = buy_missing_line(
+            db,
+            meal_id,
+            line_id,
+            quantity=body.quantity,
+            unit=body.unit,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(bought.meal)
+    db.refresh(bought.item)
+    return BoughtMissingRead(
+        meal=meal_to_read(bought.meal),
+        item_id=bought.item.id,
+        item_name=bought.item.name,
+        quantity=bought.quantity.amount,
+        unit=bought.quantity.unit,
+        created=bought.created,
+    )
