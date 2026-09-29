@@ -150,21 +150,57 @@ export function expiredAcknowledgement(
   return `I know ${parts.slice(0, -1).join(", ")} and ${last}`;
 }
 
-export function shoppingListText(
-  lines: {
-    kind: string;
-    missing_name?: string | null;
-    missing_note?: string | null;
-    item_name?: string;
-  }[],
-): string {
+export type ShoppingLine = {
+  kind: string;
+  missing_name?: string | null;
+  missing_note?: string | null;
+  item_name?: string;
+};
+
+export type ShoppingEntry = {
+  name: string;
+  note: string | null;
+};
+
+/** Missing lines only, in meal order, as name plus an optional quantity note. */
+export function shoppingListEntries(lines: ShoppingLine[]): ShoppingEntry[] {
   return lines
     .filter((line) => line.kind === "missing")
     .map((line) => {
-      const name = line.missing_name || line.item_name || "ingredient";
-      return line.missing_note ? `${name} — ${line.missing_note}` : name;
-    })
-    .join("\n");
+      const name = (line.missing_name || line.item_name || "ingredient").trim() || "ingredient";
+      const note = line.missing_note?.trim() || null;
+      return { name, note };
+    });
+}
+
+export function formatShoppingEntry(entry: ShoppingEntry): string {
+  return entry.note ? `${entry.name} — ${entry.note}` : entry.name;
+}
+
+export function shoppingListText(lines: ShoppingLine[]): string {
+  return shoppingListEntries(lines).map(formatShoppingEntry).join("\n");
+}
+
+/** A markdown checklist of the same missing lines, titled with the meal. */
+export function shoppingListMarkdown(
+  meal: { title: string; servings: number },
+  lines: ShoppingLine[],
+): string {
+  const title = meal.title.trim() || "Meal";
+  const servings = meal.servings === 1 ? "1 serving" : `${meal.servings} servings`;
+  const items = shoppingListEntries(lines).map((entry) => `- [ ] ${formatShoppingEntry(entry)}`);
+  const body = items.length > 0 ? items.join("\n") : "Nothing to buy.";
+  return `# ${title}\n\nShopping list · ${servings}\n\n${body}\n`;
+}
+
+export function shoppingListFilename(title: string, extension: "txt" | "md"): string {
+  const slug = title
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return `${slug || "meal"}-shopping-list.${extension}`;
 }
 
 export function retriesSameSentence(action: string): boolean {
