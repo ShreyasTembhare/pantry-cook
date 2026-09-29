@@ -102,3 +102,45 @@
     color: oklch(0.22 0.01 60);
   }
 }
+
+/* Printed shopping list: the rail, header, and tab bar stay off the page. */
+@media print {
+  :root,
+  .dark {
+    --background: #fff;
+    --foreground: #1c1917;
+    --muted-foreground: #44403c;
+    --border: #d6d3d1;
+    --card: #fff;
+    --card-foreground: #1c1917;
+  }
+
+  [data-app-chrome],
+  [data-sonner-toaster],
+  .print-hide {
+    display: none !important;
+  }
+
+  html,
+  body,
+  [data-app-shell],
+  [data-app-column],
+  main {
+    display: block !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #1c1917 !important;
+  }
+
+  [data-shopping-list] {
+    max-width: none;
+    padding: 0;
+  }
+
+  [data-shopping-list] li {
+    break-inside: avoid;
+  }
+}

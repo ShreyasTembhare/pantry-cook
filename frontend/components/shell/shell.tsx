@@ -113,8 +113,11 @@ export function Shell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="flex h-full flex-col lg:flex-row">
-      <aside className="hidden lg:flex lg:w-56 lg:flex-col lg:border-r lg:border-border">
+    <div data-app-shell className="flex h-full flex-col lg:flex-row">
+      <aside
+        data-app-chrome
+        className="hidden lg:flex lg:w-56 lg:flex-col lg:border-r lg:border-border"
+      >
         <div className="px-5 pt-5">
           <h1 className="font-serif text-lg font-semibold tracking-tight">Pantry Cook</h1>
           {demoChef ? (
@@ -135,8 +138,11 @@ export function Shell({ children }: { children: ReactNode }) {
         ) : null}
       </aside>
 
-      <div className="flex min-h-0 flex-1 flex-col">
-        <header className="flex min-h-14 items-center justify-between gap-3 border-b border-border px-4 py-2 lg:hidden">
+      <div data-app-column className="flex min-h-0 flex-1 flex-col">
+        <header
+          data-app-chrome
+          className="flex min-h-14 items-center justify-between gap-3 border-b border-border px-4 py-2 lg:hidden"
+        >
           <div className="flex items-center gap-2">
             <h1 className="font-serif text-lg font-semibold tracking-tight">Pantry Cook</h1>
             {demoChef ? <DemoBadge /> : null}
@@ -149,6 +155,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <main className="flex-1 overflow-y-auto">{children}</main>
 
         <nav
+          data-app-chrome
           aria-label="Mobile"
           className="flex items-center justify-around border-t border-border bg-background pb-safe lg:hidden"
         >
