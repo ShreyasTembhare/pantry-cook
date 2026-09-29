@@ -16,9 +16,39 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ApiError, getMeal, undoMeal, type MealLine } from "@/lib/api";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ApiError, buyMissingLine, getMeal, undoMeal, type MealLine, type Unit } from "@/lib/api";
 import { shoppingListText } from "@/lib/cook";
+import { knownPurchase } from "@/lib/quantity";
 import { cn } from "@/lib/utils";
+
+const UNITS: { value: Unit; label: string }[] = [
+  { value: "g", label: "g" },
+  { value: "kg", label: "kg" },
+  { value: "ml", label: "ml" },
+  { value: "L", label: "L" },
+  { value: "count", label: "count" },
+];
+
+function purchaseError(quantity: string, unit: Unit): string | null {
+  const trimmed = quantity.trim();
+  if (!trimmed) return "Enter a quantity.";
+  const numeric = Number(trimmed);
+  if (!Number.isFinite(numeric)) return "Use a number, like 200 or 1.5.";
+  if (numeric <= 0) return "Quantity has to be more than zero.";
+  if (numeric > 1_000_000) return "That amount is too large.";
+  if (unit === "count" && !Number.isInteger(numeric)) return "Counts must be whole numbers.";
+  if (unit !== "count" && numeric < 0.01) return "Smallest amount is 0.01.";
+  return null;
+}
 
 function formatWhen(value: string | null): string {
   if (!value) return "";
@@ -41,6 +71,39 @@ export function MealDetail({ id }: { id: string }) {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [copying, setCopying] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [ask, setAsk] = useState<{
+    lineId: string;
+    quantity: string;
+    unit: Unit;
+    error: string;
+  } | null>(null);
+  const buy = useMutation({
+    mutationFn: (input: { lineId: string; purchase?: { quantity: string; unit: Unit } }) =>
+      buyMissingLine(id, input.lineId, input.purchase),
+    onSuccess: (result) => {
+      queryClient.setQueryData(["meals", "detail", id], result.meal);
+      void queryClient.invalidateQueries({ queryKey: ["meals", "cooked"] });
+      void queryClient.invalidateQueries({ queryKey: ["meals", "proposed"] });
+      void queryClient.invalidateQueries({ queryKey: ["meals", "undone"] });
+      void queryClient.invalidateQueries({ queryKey: ["items"] });
+      setAsk(null);
+      const amount = `${result.quantity} ${result.unit}`;
+      toast.success(
+        result.created
+          ? `Bought ${amount} of ${result.item_name}.`
+          : `Added ${amount} to ${result.item_name}.`,
+      );
+    },
+    onError: (error, variables) => {
+      if (error instanceof ApiError && error.problem.code === "quantity_required") {
+        setAsk({ lineId: variables.lineId, quantity: "", unit: "g", error: "" });
+        return;
+      }
+      toast.error(
+        error instanceof ApiError ? error.problem.detail : "Couldn't add that to the pantry.",
+      );
+    },
+  });
   const undo = useMutation({
     mutationFn: () => undoMeal(id),
     onSuccess: (meal) => {
@@ -238,24 +301,125 @@ export function MealDetail({ id }: { id: string }) {
               {missing.map((line) => {
                 const name = line.missing_name || line.item_name;
                 const done = Boolean(checked[line.id]);
+                const pending = buy.isPending && buy.variables?.lineId === line.id;
+                const asking = ask?.lineId === line.id ? ask : null;
                 return (
                   <li key={line.id} className="py-1.5">
-                    <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm leading-relaxed">
-                      <input
-                        type="checkbox"
-                        className="mt-1 size-4 accent-primary"
-                        checked={done}
-                        onChange={(event) =>
-                          setChecked((current) => ({ ...current, [line.id]: event.target.checked }))
-                        }
-                      />
-                      <span className={cn(done && "text-muted-foreground line-through")}>
-                        {name}
-                        {line.missing_note ? (
-                          <span className="text-muted-foreground"> · {line.missing_note}</span>
+                    <div className="flex items-start justify-between gap-3">
+                      <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm leading-relaxed">
+                        <input
+                          type="checkbox"
+                          className="mt-1 size-4 accent-primary"
+                          checked={done}
+                          onChange={(event) =>
+                            setChecked((current) => ({
+                              ...current,
+                              [line.id]: event.target.checked,
+                            }))
+                          }
+                        />
+                        <span className={cn(done && "text-muted-foreground line-through")}>
+                          {name}
+                          {line.missing_note ? (
+                            <span className="text-muted-foreground"> · {line.missing_note}</span>
+                          ) : null}
+                        </span>
+                      </label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-11 shrink-0 lg:h-8"
+                        aria-label={`I bought this: ${name}`}
+                        disabled={buy.isPending}
+                        onClick={() => {
+                          const known = knownPurchase(line);
+                          if (!known) {
+                            setAsk({ lineId: line.id, quantity: "", unit: "g", error: "" });
+                            return;
+                          }
+                          buy.mutate({ lineId: line.id, purchase: known });
+                        }}
+                      >
+                        {pending ? "Adding" : "I bought this"}
+                      </Button>
+                    </div>
+                    {asking ? (
+                      <form
+                        className="mt-2 flex flex-wrap items-end gap-2 pl-7"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          const message = purchaseError(asking.quantity, asking.unit);
+                          if (message) {
+                            setAsk({ ...asking, error: message });
+                            return;
+                          }
+                          buy.mutate({
+                            lineId: line.id,
+                            purchase: { quantity: asking.quantity.trim(), unit: asking.unit },
+                          });
+                        }}
+                      >
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`bought-${line.id}-quantity`} className="text-xs font-normal text-muted-foreground">
+                            Quantity
+                          </Label>
+                          <Input
+                            id={`bought-${line.id}-quantity`}
+                            value={asking.quantity}
+                            onChange={(event) =>
+                              setAsk({ ...asking, quantity: event.target.value, error: "" })
+                            }
+                            inputMode="decimal"
+                            autoFocus
+                            aria-invalid={Boolean(asking.error)}
+                            placeholder="200"
+                            className="h-11 w-24 tabular-nums slashed-zero lg:h-9"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`bought-${line.id}-unit`} className="text-xs font-normal text-muted-foreground">
+                            Unit
+                          </Label>
+                          <Select
+                            value={asking.unit}
+                            onValueChange={(value) =>
+                              setAsk({ ...asking, unit: value as Unit, error: "" })
+                            }
+                          >
+                            <SelectTrigger
+                              id={`bought-${line.id}-unit`}
+                              className="h-11 w-24 lg:h-9"
+                              aria-label={`Unit for ${name}`}
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {UNITS.map((unit) => (
+                                <SelectItem key={unit.value} value={unit.value}>
+                                  {unit.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button type="submit" className="h-11 lg:h-9" disabled={buy.isPending}>
+                          Add to pantry
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-11 lg:h-9"
+                          onClick={() => setAsk(null)}
+                        >
+                          Cancel
+                        </Button>
+                        {asking.error ? (
+                          <p className="w-full text-xs text-destructive" role="alert">
+                            {asking.error}
+                          </p>
                         ) : null}
-                      </span>
-                    </label>
+                      </form>
+                    ) : null}
                   </li>
                 );
               })}
