@@ -22,7 +22,7 @@ import {
   startCook,
   type CookSession,
 } from "@/lib/api";
-import { cookErrorPresentation, retriesSameSentence } from "@/lib/cook";
+import { cookErrorPresentation, displayCookSentence, retriesSameSentence } from "@/lib/cook";
 import { proposalFromTokens } from "@/lib/reveal";
 import { useCookStream } from "@/lib/use-cook-stream";
 import { useRevealedProposal } from "@/lib/use-revealed-proposal";
@@ -160,7 +160,7 @@ export function CookSessionView({ id }: { id: string }) {
       revise.mutate(REPROPOSE_NOTE);
       return;
     }
-    if (retriesSameSentence(presentation.action) && sentence) {
+    if (retriesSameSentence(presentation.action) && sentence !== undefined) {
       restart.mutate(sentence);
       return;
     }
@@ -236,7 +236,7 @@ export function CookSessionView({ id }: { id: string }) {
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
       <p className="mb-4 max-w-prose text-sm leading-relaxed text-muted-foreground">
-        “{session.sentence}”
+        \u201c{displayCookSentence(session.sentence)}\u201d
       </p>
 
       <RevisionTimeline attempts={session.attempts} />
