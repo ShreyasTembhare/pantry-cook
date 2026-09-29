@@ -283,7 +283,7 @@ export type CookSummary = z.infer<typeof cookSummarySchema>;
 export type Meal = z.infer<typeof mealSchema>;
 export type MealListItem = z.infer<typeof mealListItemSchema>;
 export type MealLine = z.infer<typeof mealLineSchema>;
-export type MealStatus = "cooked" | "proposed";
+export type MealStatus = "cooked" | "proposed" | "undone";
 export type Health = z.infer<typeof healthSchema>;
 
 export function getHealth(): Promise<Health> {
@@ -354,6 +354,10 @@ export function listMeals(status: MealStatus = "cooked"): Promise<MealListItem[]
 
 export function getMeal(id: string): Promise<Meal> {
   return request(`/api/meals/${id}`, mealSchema);
+}
+
+export function undoMeal(id: string): Promise<Meal> {
+  return request(`/api/meals/${id}/undo`, mealSchema, { method: "POST" });
 }
 
 export function fieldErrorsFromProblem(problem: ProblemDetails): Partial<Record<string, string>> {
