@@ -15,6 +15,7 @@ from app.graph.nodes import (
     LlmCallError,
     _invoke_structured,
     commit_meal,
+    constraints_for_expiring,
     find_violations,
     load_pantry,
     parse_sentence,
@@ -22,6 +23,7 @@ from app.graph.nodes import (
     rows_for_prompt,
     validate_proposal,
 )
+from app.graph.prompts import EXPIRING_COOK_NOTE
 from app.graph.state import initial_cook_state
 from app.schemas.items import ItemCreate
 from app.schemas.llm import MealProposal, ProposedMissingLine
@@ -105,6 +107,40 @@ class TestParseSentence:
         assert constraints["servings"] == 4
         assert constraints["max_minutes"] == 20
         assert constraints["must_use_item_ids"] == ["leeks"]
+
+    def test_blank_sentence_pins_the_three_soonest(self) -> None:
+        llm = FakeMealModel()
+        state = initial_cook_state("s", "   ")
+        state["pantry_snapshot"] = [
+            pantry_row("rice", "Rice", "500", expires_on=soon(10)),
+            pantry_row("yoghurt", "Yoghurt", "200", expires_on=date.today() - timedelta(days=1)),
+            pantry_row(
+                "eggs",
+                "Eggs",
+                "6",
+                dimension=Dimension.COUNT,
+                unit=Unit.COUNT,
+            ),
+            pantry_row("spinach", "Spinach", "180", expires_on=soon(1)),
+            pantry_row("milk", "Milk", "1000", expires_on=soon(2)),
+            pantry_row("empty", "Empty jar", "0", expires_on=soon(0)),
+        ]
+        parsed = parse_sentence(state, llm)
+        assert parsed["error"] is None
+        assert parsed["constraints"]["must_use_item_ids"] == ["spinach", "milk", "rice"]
+        assert parsed["constraints"]["free_text_notes"] == EXPIRING_COOK_NOTE
+        assert parsed["constraints"]["servings"] == 2
+        assert llm.received == []
+
+    def test_blank_sentence_with_nothing_dated_forces_no_ids(self) -> None:
+        llm = FakeMealModel()
+        state = initial_cook_state("s", "")
+        state["pantry_snapshot"] = [pantry_row("rice", "Rice", "500")]
+        constraints = constraints_for_expiring(state["pantry_snapshot"])
+        parsed = parse_sentence(state, llm)
+        assert constraints.must_use_item_ids == []
+        assert parsed["constraints"]["must_use_item_ids"] == []
+        assert parsed["constraints"]["free_text_notes"] == EXPIRING_COOK_NOTE
 
 
 class TestProposeMeal:
