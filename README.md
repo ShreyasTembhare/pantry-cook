@@ -77,6 +77,8 @@ curl -s -X POST localhost:8787/api/cook/<thread_id>/confirm \
 
 Revise with `POST /api/cook/<thread_id>/revise` and `{"note":"fewer steps"}`. Abandon with `POST /api/cook/<thread_id>/abandon`. Cooked meals are `GET /api/meals` and `GET /api/meals/<id>`.
 
+`POST /api/meals/<id>/undo` puts the quantities that meal subtracted back into the pantry in one transaction and marks the meal `undone`. Calling it again returns the undone meal and does not add those quantities a second time.
+
 The cook graph pauses on a SqliteSaver checkpoint, so stopping the server after a proposal and starting it again still accepts confirm on the same thread id.
 
 ### Hardening
