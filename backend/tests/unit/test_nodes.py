@@ -1,15 +1,19 @@
 """Each cook node, with the fake model where a model is involved."""
 
+import time
 from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from langchain_core.runnables import RunnableLambda
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.repositories import ItemRepository
 from app.domain.units import Dimension, Unit
 from app.graph.llm import FakeMealModel
 from app.graph.nodes import (
+    LlmCallError,
+    _invoke_structured,
     commit_meal,
     find_violations,
     load_pantry,
@@ -132,6 +136,61 @@ class TestProposeMeal:
         assert [row["name"] for row in hidden] == ["Rice"]
         named = rows_for_prompt(snapshot, "use the salt")
         assert {row["name"] for row in named} == {"Salt", "Rice"}
+
+    def test_a_timeout_is_not_retried_as_bad_json(self) -> None:
+        llm = FakeMealModel(script=[TimeoutError("slow"), "unused"])
+        state = initial_cook_state("s", "warm rice tonight")
+        state["pantry_snapshot"] = [pantry_row("rice", "Rice", "500")]
+        result = propose_meal(state, llm)
+        assert result["proposal"] is None
+        assert result["error"]["code"] == "llm_timeout"
+        assert len(llm.received) == 1
+
+    def test_a_rate_limit_keeps_retry_after(self) -> None:
+        class RateLimitError(Exception):
+            def __init__(self) -> None:
+                super().__init__("busy")
+                self.status_code = 429
+                self.headers = {"retry-after": "12"}
+
+        llm = FakeMealModel(script=[RateLimitError()])
+        state = initial_cook_state("s", "warm rice tonight")
+        result = propose_meal(state, llm)
+        assert result["error"]["code"] == "llm_rate_limited"
+        assert result["error"]["retry_after"] == 12
+        assert len(llm.received) == 1
+
+    def test_an_auth_error_is_unavailable(self) -> None:
+        class AuthError(Exception):
+            status_code = 401
+
+        llm = FakeMealModel(script=[AuthError("bad key")])
+        state = initial_cook_state("s", "warm rice tonight")
+        result = parse_sentence(state, llm)
+        assert result["error"]["code"] == "llm_unavailable"
+
+    def test_invalid_output_is_still_retried(self) -> None:
+        llm = FakeMealModel(script=["nope", "still nope", "nope again"])
+        state = initial_cook_state("s", "warm rice tonight")
+        result = propose_meal(state, llm)
+        assert result["error"]["code"] == "llm_output_invalid"
+        assert len(llm.received) == 3
+
+    def test_the_node_wall_clock_stops_a_hung_call(self) -> None:
+        class Sleepy:
+            def with_structured_output(self, schema: object, **kwargs: object) -> RunnableLambda:
+                del schema, kwargs
+
+                def _call(messages: object) -> object:
+                    del messages
+                    time.sleep(0.3)
+                    return None
+
+                return RunnableLambda(_call)
+
+        with pytest.raises(LlmCallError) as caught:
+            _invoke_structured(Sleepy(), object, [], wall_seconds=0.05)  # type: ignore[arg-type]
+        assert caught.value.code == "llm_timeout"
 
 
 class TestValidateProposal:
