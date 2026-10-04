@@ -162,4 +162,6 @@ def _checked_quantity(amount: Decimal, unit: Unit) -> Quantity:
 
 def _line_name(line: MealLine) -> str:
     raw = line.missing_name or line.item_name_snapshot or ""
-    return re.sub(r"\s+", " ", raw).strip()
+    cleaned = re.sub(r"\s+", " ", raw).strip()
+    # Match how sentence adds name things, so "cream" and "Cream" are one pantry row.
+    return cleaned[:1].upper() + cleaned[1:]

@@ -22,7 +22,7 @@ export default function CookError({
           Retry
         </Button>
         <Button asChild variant="ghost" className="h-11 lg:h-9">
-          <Link href="/">Back to pantry</Link>
+          <Link href="/pantry">Back to pantry</Link>
         </Button>
       </div>
     </div>

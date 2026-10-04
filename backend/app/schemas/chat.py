@@ -47,6 +47,43 @@ class ChatPlan(BaseModel):
     actions: list[ChatAction] = Field(default_factory=list)
 
 
+class DraftChatAction(BaseModel):
+    """Model-facing action. Plain floats keep the JSON schema simple for hosted models."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    tool: ChatTool
+    sentence: str | None = None
+    item_name: str | None = None
+    quantity: float | None = None
+    unit: Literal["g", "kg", "ml", "L", "count"] | None = None
+    note: str | None = None
+    meal_id: str | None = None
+
+    def to_action(self) -> ChatAction:
+        return ChatAction(
+            tool=self.tool,
+            sentence=self.sentence,
+            item_name=self.item_name,
+            quantity=None if self.quantity is None else Decimal(str(self.quantity)),
+            unit=None if self.unit is None else Unit(self.unit),
+            note=self.note,
+            meal_id=self.meal_id,
+        )
+
+
+class DraftChatPlan(BaseModel):
+    """What the planner model returns: a short reply and at most one action."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    reply: str = Field(min_length=1, max_length=2000)
+    actions: list[DraftChatAction] = Field(default_factory=list, max_length=3)
+
+    def to_plan(self) -> ChatPlan:
+        return ChatPlan(reply=self.reply, actions=[a.to_action() for a in self.actions])
+
+
 class ChatMessageIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

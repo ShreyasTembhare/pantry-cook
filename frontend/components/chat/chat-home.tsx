@@ -4,8 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { ChatComposer } from "@/components/chat/chat-composer";
+import { ChatComposer, type PantryState } from "@/components/chat/chat-composer";
 import { ChatMessage } from "@/components/chat/chat-message";
+import { ChatStatus } from "@/components/chat/chat-status";
 import { Pip } from "@/components/mascot/pip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import {
   type ChatThread,
   type ChatTurn,
 } from "@/lib/api";
+import { liveCookCardKey, openPendingCard, sendFailure } from "@/lib/chat";
 import { suggestionChips } from "@/lib/cook";
 import { localISODate } from "@/lib/pantry";
 import { useChatTurn } from "@/lib/use-chat-turn";
@@ -39,14 +41,38 @@ export function ChatHome() {
   const itemsQuery = useQuery({ queryKey: ["items"], queryFn: listItems });
   const { thinking, send } = useChatTurn();
   const [pendingUser, setPendingUser] = useState<ChatMessageModel | null>(null);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const [failed, setFailed] = useState<{ text: string; message: string; action: string } | null>(
+    null,
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const today = localISODate(new Date());
 
   const messages = threadQuery.data?.messages ?? [];
-  const visible = pendingUser ? [...messages, pendingUser] : messages;
+  const failedMessage: ChatMessageModel | null = failed
+    ? {
+        id: "failed-user-1",
+        role: "user",
+        content: failed.text,
+        cards: [],
+        created_at: new Date().toISOString(),
+      }
+    : null;
+  const visible = [
+    ...messages,
+    ...(pendingUser ? [pendingUser] : []),
+    ...(failedMessage ? [failedMessage] : []),
+  ];
   const chips = suggestionChips(itemsQuery.data ?? [], today).map((chip) => chip.sentence);
+  const openPending = openPendingCard(messages);
+  const liveCook = liveCookCardKey(messages, threadQuery.data?.active_cook_session_id ?? null);
+  const pantryState: PantryState = itemsQuery.isError
+    ? "error"
+    : itemsQuery.isPending
+      ? "loading"
+      : (itemsQuery.data ?? []).length === 0
+        ? "empty"
+        : "ready";
 
   const confirm = useMutation({
     mutationFn: ({ id, acknowledge }: { id: string; acknowledge: boolean }) =>
@@ -107,12 +133,14 @@ export function ChatHome() {
   }
 
   useEffect(() => {
+    if (visible.length === 0 && !thinking) return;
     bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [visible.length, thinking, threadQuery.dataUpdatedAt]);
 
   async function say(text: string) {
     const trimmed = text.trim();
     if (!trimmed || thinking || confirm.isPending || cancel.isPending) return;
+    setFailed(null);
     setPendingUser({
       id: `pending-user-${Date.now()}`,
       role: "user",
@@ -124,12 +152,12 @@ export function ChatHome() {
       const turn = await send(trimmed);
       mergeTurn(turn);
       setPendingUser(null);
-      setSendError(null);
+      void client.invalidateQueries({ queryKey: ["chat"] });
     } catch (error) {
       setPendingUser(null);
-      const message = error instanceof ApiError ? error.message : "Pip couldn't reply. Try again.";
-      setSendError(message);
-      toast.error(message);
+      const shown = sendFailure(error);
+      setFailed({ text: trimmed, ...shown });
+      toast.error(shown.message);
     }
   }
 
@@ -139,8 +167,17 @@ export function ChatHome() {
 
   return (
     <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col">
-      <ScrollArea className="h-full min-h-0 flex-1">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 py-6 sm:px-6">
+      <ChatStatus
+        cookSessionId={threadQuery.data?.active_cook_session_id ?? null}
+        pending={openPending}
+      />
+      <ScrollArea className="min-h-0 flex-1 overflow-hidden">
+        <div
+          role="log"
+          aria-label="Conversation"
+          aria-live="polite"
+          className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 py-6 sm:px-6"
+        >
           {threadQuery.isError ? (
             <Alert variant="destructive">
               <AlertTitle>Couldn&apos;t load your conversation.</AlertTitle>
@@ -156,19 +193,13 @@ export function ChatHome() {
               </AlertDescription>
             </Alert>
           ) : null}
-          {sendError ? (
-            <Alert variant="destructive">
-              <AlertTitle>Message didn&apos;t send</AlertTitle>
-              <AlertDescription>{sendError}</AlertDescription>
-            </Alert>
-          ) : null}
           {threadQuery.isPending && messages.length === 0 ? (
             <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
               Loading chat…
             </div>
           ) : null}
           {showWelcome ? (
-            <Empty className="border-0 bg-transparent px-4 py-8">
+            <Empty className="border-0 bg-transparent px-4 py-4">
               <EmptyHeader>
                 <EmptyMedia>
                   <Pip className="h-20 w-16" />
@@ -189,6 +220,8 @@ export function ChatHome() {
               message={message}
               pantry={itemsQuery.data ?? []}
               busy={busy}
+              openPendingId={openPending?.pending_id ?? null}
+              liveCookCardKey={liveCook}
               onConfirmPending={(id, acknowledge) => confirm.mutate({ id, acknowledge })}
               onCancelPending={(id) => cancel.mutate(id)}
               onRevise={(note) => void say(`Revise the meal: ${note}`)}
@@ -196,8 +229,33 @@ export function ChatHome() {
               onAskConfirm={() => void say("looks good")}
             />
           ))}
+          {failed ? (
+            <Alert variant="destructive">
+              <AlertTitle>Message didn&apos;t send</AlertTitle>
+              <AlertDescription className="flex flex-wrap items-center gap-2">
+                <span>{failed.message}</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void say(failed.text)}
+                >
+                  {failed.action}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setFailed(null)}
+                >
+                  Dismiss
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : null}
           {thinking ? (
-            <div className="flex items-center gap-3" aria-live="polite">
+            <div className="flex items-center gap-3">
               <Pip mood="thinking" className="h-10 w-9" />
               <p className="text-sm text-muted-foreground">Pip is thinking…</p>
             </div>
@@ -205,7 +263,13 @@ export function ChatHome() {
           <div ref={bottomRef} aria-hidden />
         </div>
       </ScrollArea>
-      <ChatComposer busy={busy} suggestions={chips} onSend={(text) => void say(text)} />
+      <ChatComposer
+        busy={busy}
+        suggestions={chips}
+        pantryState={pantryState}
+        onRetryPantry={() => void itemsQuery.refetch()}
+        onSend={(text) => void say(text)}
+      />
     </div>
   );
 }

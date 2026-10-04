@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     llm_timeout: float = 30
     llm_max_tokens: int = 0
     llm_max_retries: int = 2
+    # Optional faster model for home chat. Empty means use PANTRY_LLM_MODEL.
+    chat_model: str = ""
+    # low, medium, or high for reasoning models such as gpt-oss. Empty leaves the default.
+    chat_reasoning_effort: str = ""
+    # Wall-clock budget for the chat planner. Slow reasoning models fall back to rules.
+    chat_planner_timeout: float = 40
     # The provider client reads this name. It is not PANTRY_OPENAI_API_KEY.
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
 

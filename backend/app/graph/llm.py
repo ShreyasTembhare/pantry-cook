@@ -118,7 +118,11 @@ def llm_mode(app_settings: Settings | None = None) -> str:
     return "fake"
 
 
-def get_llm(app_settings: Settings | None = None) -> BaseChatModel:
+def get_llm(
+    app_settings: Settings | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+) -> BaseChatModel:
     """Return ``init_chat_model`` when a provider key is set, else the offline chef.
 
     The model id (``openai:gpt-4o-mini`` by default) is configuration. There is
@@ -132,7 +136,7 @@ def get_llm(app_settings: Settings | None = None) -> BaseChatModel:
     key = cfg.openai_api_key.strip()
     if key and not os.environ.get("OPENAI_API_KEY"):
         os.environ["OPENAI_API_KEY"] = key
-    model = (cfg.llm_model or "openai:gpt-4o-mini").strip() or "openai:gpt-4o-mini"
+    model = (model or cfg.llm_model or "openai:gpt-4o-mini").strip() or "openai:gpt-4o-mini"
     kwargs: dict[str, Any] = {
         "temperature": 0,
         "timeout": float(cfg.llm_timeout or 30),
@@ -143,6 +147,8 @@ def get_llm(app_settings: Settings | None = None) -> BaseChatModel:
     base_url = (cfg.llm_base_url or "").strip()
     if base_url:
         kwargs["base_url"] = base_url
+    if reasoning_effort:
+        kwargs["reasoning_effort"] = reasoning_effort
     return _init_chat_model(model, **kwargs)
 
 

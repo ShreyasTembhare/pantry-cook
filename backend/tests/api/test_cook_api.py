@@ -500,14 +500,14 @@ class TestBuyMissingLine:
         assert bought.status_code == 200, bought.text
         body = bought.json()
         assert body["created"] is True
-        assert body["item_name"] == "olive oil"
+        assert body["item_name"] == "Olive oil"
         assert body["unit"] == "ml"
         assert Decimal(body["quantity"]) == Decimal("250")
         assert all(row["id"] != line_id for row in body["meal"]["lines"])
         assert body["meal"]["missing_count"] == 0
 
         items = cook.client.get("/api/items")
-        oil = next(item for item in items.json() if item["name"] == "olive oil")
+        oil = next(item for item in items.json() if item["name"] == "Olive oil")
         assert oil["unit"] == "ml"
         assert Decimal(oil["quantity"]) == Decimal("250")
         assert oil["id"] == body["item_id"]

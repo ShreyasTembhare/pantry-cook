@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowUp } from "lucide-react";
+import Link from "next/link";
 import { useState, type FormEvent, type KeyboardEvent } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -11,13 +12,19 @@ const STARTERS = [
   "Something warm for dinner",
 ];
 
+export type PantryState = "loading" | "ready" | "empty" | "error";
+
 export function ChatComposer({
   busy,
   suggestions,
+  pantryState = "ready",
+  onRetryPantry,
   onSend,
 }: {
   busy: boolean;
   suggestions: string[];
+  pantryState?: PantryState;
+  onRetryPantry?: () => void;
   onSend: (text: string) => void;
 }) {
   const [text, setText] = useState("");
@@ -39,20 +46,46 @@ export function ChatComposer({
 
   return (
     <form
-      className="shrink-0 border-t border-border/70 bg-background/95 px-3 py-3 pb-safe backdrop-blur"
+      className="shrink-0 border-t border-border/70 bg-background px-3 py-3"
       onSubmit={(event: FormEvent) => {
         event.preventDefault();
         submit();
       }}
     >
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
-        <div className="flex gap-2 overflow-x-auto pb-1">
+        {pantryState === "error" ? (
+          <p className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
+            Couldn&apos;t load the pantry, so these are examples.
+            <button
+              type="button"
+              className="font-medium text-primary underline"
+              onClick={onRetryPantry}
+            >
+              Retry
+            </button>
+          </p>
+        ) : null}
+        {pantryState === "empty" ? (
+          <p className="text-xs text-muted-foreground" role="status">
+            The pantry is empty.{" "}
+            <Link href="/pantry" className="font-medium text-primary underline">
+              Add items
+            </Link>{" "}
+            or tell Pip what you have.
+          </p>
+        ) : null}
+        <div
+          className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          role="group"
+          aria-label="Suggested messages"
+        >
           {chips.map((chip) => (
             <button
               key={chip}
               type="button"
               disabled={busy}
-              className="shrink-0 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+              title={chip}
+              className="max-w-[16rem] shrink-0 truncate rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
               onClick={() => onSend(chip)}
             >
               {chip}
@@ -69,7 +102,7 @@ export function ChatComposer({
             value={text}
             disabled={busy}
             placeholder="Add leeks, cook something warm, or change the recipe"
-            className="max-h-36 min-h-11 flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground"
+            className="field-sizing-content max-h-36 min-h-11 flex-1 resize-none overflow-y-auto bg-transparent px-2 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground"
             onChange={(event) => setText(event.target.value)}
             onKeyDown={onKeyDown}
           />

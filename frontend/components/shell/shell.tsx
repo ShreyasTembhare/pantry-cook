@@ -86,7 +86,7 @@ function ThemeToggle() {
   return (
     <button
       type="button"
-      className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
       aria-label={dark ? "Use light theme" : "Use dark theme"}
       onClick={() => setTheme(dark ? "light" : "dark")}
     >
@@ -108,7 +108,7 @@ function UnfinishedPill({ href, sentence, count }: { href: string; sentence: str
     <Link
       href={href}
       title={sentence}
-      className="inline-flex h-8 max-w-full items-center truncate rounded-full border border-warning/50 bg-warning/20 px-3 text-xs font-medium text-warning-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      className="inline-flex h-8 min-w-0 max-w-36 items-center truncate rounded-full border border-warning/50 bg-warning/20 px-3 text-xs font-medium text-warning-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:max-w-56"
     >
       <span className="sm:hidden">{count > 1 ? `${count} unfinished` : "Unfinished"}</span>
       <span className="hidden sm:inline">{label}</span>
@@ -161,7 +161,7 @@ export function Shell({ children }: { children: ReactNode }) {
             <NavLink key={item.href} {...item} active={isActive(item.href)} />
           ))}
         </nav>
-        <div className="flex items-center justify-between gap-2 px-3 pb-5">
+        <div className="flex min-w-0 items-center justify-between gap-2 px-3 pb-5">
           {latest ? (
             <UnfinishedPill href={`/cook/${latest.id}`} sentence={latest.sentence} count={unfinished.length} />
           ) : (
@@ -176,12 +176,12 @@ export function Shell({ children }: { children: ReactNode }) {
           data-app-chrome
           className="flex min-h-14 items-center justify-between gap-3 border-b border-border px-4 py-2 lg:hidden"
         >
-          <div className="flex items-center gap-2">
-            <Pip className="h-9 w-8" />
-            <h1 className="font-serif text-lg font-semibold tracking-tight">Pantry Cook</h1>
+          <div className="flex min-w-0 items-center gap-2">
+            <Pip className="h-9 w-8 shrink-0" />
+            <h1 className="truncate font-serif text-lg font-semibold tracking-tight">Pantry Cook</h1>
             {demoChef ? <DemoBadge /> : null}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <ThemeToggle />
             {latest ? (
               <UnfinishedPill href={`/cook/${latest.id}`} sentence={latest.sentence} count={unfinished.length} />

@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { PageHeader } from "@/components/chrome/page-header";
 import { CookErrorCard } from "@/components/cook/cook-error";
 import { CookStartSkeleton } from "@/components/cook/cook-skeleton";
 import { Button } from "@/components/ui/button";
@@ -75,7 +76,7 @@ export function CookStart() {
     if (!failure) return;
     const presentation = cookErrorPresentation(failure.problem.code, failure.problem.detail);
     if (presentation.action === "Add items") {
-      router.push("/");
+      router.push("/pantry");
       return;
     }
     if (retriesSameSentence(presentation.action)) {
@@ -88,12 +89,10 @@ export function CookStart() {
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
-      <header className="mb-6">
-        <h2 className="font-serif text-[1.75rem] leading-none tracking-tight">Cook</h2>
-        <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
-          Say what you want, or leave it blank to cook what&apos;s expiring.
-        </p>
-      </header>
+      <PageHeader
+        title="Cook"
+        lede="Say what you want, or leave it blank to cook what's expiring."
+      />
 
       {itemsQuery.isError ? (
         <div
@@ -126,7 +125,7 @@ export function CookStart() {
             cupboard, then come back with a sentence.
           </p>
           <Button asChild className="mt-4 h-11 lg:h-9">
-            <Link href="/">Add items</Link>
+            <Link href="/pantry">Add items</Link>
           </Button>
         </div>
       ) : null}

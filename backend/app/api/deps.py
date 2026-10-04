@@ -58,5 +58,15 @@ def get_sentence_llm() -> Any:
 
 
 def get_chat_model() -> Any:
-    """Same chef as cook and quick-add. Tests override this with the fake model."""
-    return get_sentence_llm()
+    """Chat planner and sentence fallback. ``PANTRY_CHAT_MODEL`` picks a faster model than cook.
+
+    Tests override this with the fake model.
+    """
+    from app.config import settings
+    from app.graph.llm import get_llm
+
+    return get_llm(
+        settings,
+        model=settings.chat_model.strip() or None,
+        reasoning_effort=settings.chat_reasoning_effort.strip() or None,
+    )

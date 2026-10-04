@@ -17,13 +17,29 @@ from sqlalchemy.orm import Session
 from app.db.models import ChatMessage, ChatPending, ChatThread, Item
 from app.db.repositories import ChatRepository, ItemRepository, MealRepository
 from app.domain.buy import buy_missing_line
+from app.domain.chat_planner import (
+    READ_ONLY_TOOLS,
+    SUPERSEDES_PENDING,
+    build_context,
+    model_plan,
+    wants_model,
+)
 from app.domain.errors import DomainError, ItemNotFoundError
 from app.domain.units import Unit
 from app.schemas.chat import ChatAction, ChatCard, ChatMessageRead, ChatPlan, ChatTurnRead
 from app.schemas.items import ItemUpdate, normalise_name_key
 
-_YES = {"yes", "yep", "yeah", "confirm", "do it", "ok", "okay", "sure", "go ahead"}
-_NO = {"no", "nope", "cancel", "never mind", "nevermind", "stop"}
+MODEL_UNAVAILABLE_REPLY = (
+    "I couldn't work that out just now. Try “2 leeks and 500 g chicken”, "
+    "“what's in the pantry”, or “something warm for dinner”."
+)
+_YES = {"yes", "yep", "yeah", "confirm", "do it", "ok", "okay", "sure", "go ahead", "y"}
+_NO = {"no", "nope", "cancel", "never mind", "nevermind", "stop", "n", "nah"}
+_USE_UP = re.compile(
+    r"\buse\b.+\b(?:before (?:it|they|that|this|these|those) (?:goes?|spoils?|expires?)|"
+    r"(?:is|are) about to (?:expire|go off|spoil))\b",
+    re.I,
+)
 _ADD_PREFIX = re.compile(r"^(please\s+)?(add|put|save|i have|i've got|we have)\s+", re.I)
 _DELETE = re.compile(
     r"\b(?:remove|delete|toss|throw out|get rid of)\s+(?:the\s+|my\s+)?(?P<name>.+)$",
@@ -44,6 +60,10 @@ _REVISE = re.compile(
     re.I,
 )
 _BOUGHT = re.compile(r"\bbought\s+(?:the\s+|some\s+)?(?P<name>.+)$", re.I)
+_BOUGHT_SIZE = re.compile(
+    r"^(?P<qty>\d+(?:[.,]\d+)?)\s*(?P<unit>kg|ml|count|g|l)?\s+(?:of\s+)?(?P<name>[^\d].*)$",
+    re.I,
+)
 
 
 def rules_chat_plan(text: str, context: dict[str, Any] | None = None) -> ChatPlan:
@@ -98,9 +118,24 @@ def rules_chat_plan(text: str, context: dict[str, Any] | None = None) -> ChatPla
 
     bought = _BOUGHT.search(raw)
     if bought:
+        rest = bought.group("name").strip(" .")
+        sized = _BOUGHT_SIZE.match(rest)
+        if sized:
+            token = (sized.group("unit") or "").casefold()
+            return ChatPlan(
+                reply=f"I'll mark {sized.group('name').strip()} as bought.",
+                actions=[
+                    ChatAction(
+                        tool="buy_missing",
+                        item_name=sized.group("name").strip(" ."),
+                        quantity=Decimal(sized.group("qty").replace(",", ".")),
+                        unit=_unit_token(token) if token else None,
+                    )
+                ],
+            )
         return ChatPlan(
-            reply=f"I'll mark {bought.group('name').strip()} as bought.",
-            actions=[ChatAction(tool="buy_missing", item_name=bought.group("name").strip(" ."))],
+            reply=f"I'll mark {rest} as bought.",
+            actions=[ChatAction(tool="buy_missing", item_name=rest)],
         )
 
     if re.search(r"\b(abandon|never mind the meal|cancel the meal|skip this)\b", folded):
@@ -115,7 +150,7 @@ def rules_chat_plan(text: str, context: dict[str, Any] | None = None) -> ChatPla
     if re.search(r"\b(looks good|cook it|i'?ll make that|let's cook)\b", folded):
         return ChatPlan(reply="Cook this?", actions=[ChatAction(tool="confirm_cook")])
 
-    if _COOK.search(raw):
+    if _COOK.search(raw) or _USE_UP.search(raw):
         sentence = raw if len(raw) >= 3 else "something warm"
         return ChatPlan(
             reply="Let me see what we can cook.",
@@ -138,13 +173,47 @@ def rules_chat_plan(text: str, context: dict[str, Any] | None = None) -> ChatPla
     )
 
 
-def plan_chat(llm: BaseChatModel, text: str, context: dict[str, Any]) -> ChatPlan:
-    """Pick tools with offline rules so Pip stays fast and reliable.
+def plan_chat(
+    db: Session,
+    graph: Any,
+    llm: BaseChatModel,
+    thread: ChatThread,
+    pending: ChatPending | None,
+    text: str,
+) -> ChatPlan:
+    """Rules first. The hosted chef only reads what the rules could not.
 
-    Hosted models are still used elsewhere (e.g. optional pantry parse fallback).
+    Every plan, from either source, runs through the same tool dispatch.
     """
-    del llm
-    return rules_chat_plan(text, context)
+    plan = rules_chat_plan(text, {"active_cook_session_id": thread.active_cook_session_id})
+    if plan.actions or not wants_model(llm):
+        return plan
+    context = _context(db, graph, thread, pending)
+    modelled = model_plan(llm, text, context)
+    if modelled is not None:
+        return modelled
+    return ChatPlan(reply=MODEL_UNAVAILABLE_REPLY, actions=[])
+
+
+def _answer(text: str) -> str | None:
+    """Read a short yes or no, ignoring case, punctuation, and a trailing please."""
+    words = re.sub(r"[^\w\s]", " ", text.casefold())
+    cleaned = " ".join(words.split())
+    cleaned = re.sub(r"\s+(please|thanks|thank you)$", "", cleaned)
+    if cleaned in _YES:
+        return "yes"
+    if cleaned in _NO:
+        return "no"
+    return None
+
+
+def _pending_label(pending: ChatPending) -> str:
+    payload = pending.payload if isinstance(pending.payload, dict) else {}
+    if pending.kind == "delete_item":
+        return f"remove {payload.get('name') or 'that item'}"
+    if pending.kind == "undo_meal":
+        return f"undo {payload.get('title') or 'that meal'}"
+    return "cook the open meal"
 
 
 def run_turn(db: Session, graph: Any, llm: BaseChatModel, text: str) -> ChatTurnRead:
@@ -154,17 +223,16 @@ def run_turn(db: Session, graph: Any, llm: BaseChatModel, text: str) -> ChatTurn
     db.commit()
     db.refresh(thread)
 
-    folded = text.strip().casefold()
+    answer = _answer(text)
     pending = open_pending(db, thread.id)
     cards: list[ChatCard]
-    if pending is not None and folded in _YES:
+    if pending is not None and answer == "yes":
         reply, cards = confirm_pending(db, graph, thread, pending)
-    elif pending is not None and folded in _NO:
+    elif pending is not None and answer == "no":
         reply, cards = cancel_pending(db, pending)
     else:
-        context = _context(db, graph, thread, pending)
         try:
-            plan = plan_chat(llm, text, context)
+            plan = plan_chat(db, graph, llm, thread, pending, text)
         except Exception as exc:
             from app.graph.nodes import LlmCallError
 
@@ -175,6 +243,16 @@ def run_turn(db: Session, graph: Any, llm: BaseChatModel, text: str) -> ChatTurn
         else:
             reply = plan.reply
             cards = []
+            first = plan.actions[0].tool if plan.actions else None
+            if pending is not None and first is not None and first not in READ_ONLY_TOOLS:
+                if first in SUPERSEDES_PENDING:
+                    ChatRepository(db).cancel_open(thread.id)
+                else:
+                    plan = ChatPlan(
+                        reply=f"Say yes or no first: should I {_pending_label(pending)}?",
+                        actions=[],
+                    )
+                    reply = plan.reply
             for action in plan.actions:
                 cards.extend(_run_action(db, graph, llm, thread, action))
 
@@ -588,14 +666,32 @@ def _context(
     thread: ChatThread,
     pending: ChatPending | None,
 ) -> dict[str, Any]:
-    del graph
-    names = [item.name for item in ItemRepository(db).list()]
+    return build_context(db, thread, pending, cook=_cook_summary(db, graph, thread))
+
+
+def _cook_summary(db: Session, graph: Any, thread: ChatThread) -> dict[str, Any]:
+    """Title and ingredient names of the open proposal, or ``present: false``."""
+    session_id = thread.active_cook_session_id
+    if not session_id or graph is None:
+        return {"present": False}
+    from app.services.cook import CookService
+
+    try:
+        session = CookService(db, graph).get(session_id)
+    except Exception:
+        return {"present": False}
+    proposal = session.proposal
+    if proposal is None:
+        return {"present": True, "status": session.status}
+    names = {item.id: item.name for item in ItemRepository(db).list()}
+    uses = [names.get(line.item_id, "an item") for line in proposal.lines if line.kind == "use"]
+    missing = [line.name for line in proposal.lines if line.kind == "missing"]
     return {
-        "pantry": names,
-        "active_cook_session_id": thread.active_cook_session_id,
-        "pending": None
-        if pending is None
-        else {"id": pending.id, "kind": pending.kind, "payload": pending.payload},
+        "present": True,
+        "status": session.status,
+        "title": proposal.title,
+        "uses": uses,
+        "missing": missing,
     }
 
 

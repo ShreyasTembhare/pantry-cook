@@ -42,6 +42,9 @@ Copy `.env.example` to `.env` in the repo root. Names match `Settings` in `backe
 | `PANTRY_LLM_TIMEOUT` | Seconds before a model call gives up. Default 30. |
 | `PANTRY_LLM_MAX_TOKENS` | Optional output cap. `0` leaves the provider default. |
 | `PANTRY_LLM_MAX_RETRIES` | Provider retries. Default 2. |
+| `PANTRY_CHAT_MODEL` | Optional faster model for home chat, for example `openai:openai/gpt-oss-20b`. Empty uses `PANTRY_LLM_MODEL`. |
+| `PANTRY_CHAT_REASONING_EFFORT` | Optional `low`, `medium`, or `high` for reasoning models used in chat. Empty keeps the default. |
+| `PANTRY_CHAT_PLANNER_TIMEOUT` | Seconds the chat planner waits for the model before using the rules reply. Default 40. |
 | `OPENAI_API_KEY` | Read by the provider client. Leave empty for offline mode. |
 | `ANTHROPIC_API_KEY` | Optional. Commented in `.env.example`. |
 | `GOOGLE_API_KEY` | Optional. Commented in `.env.example`. |
@@ -50,7 +53,15 @@ Copy `.env.example` to `.env` in the repo root. Names match `Settings` in `backe
 | `PANTRY_CORS_ORIGINS` | JSON list of allowed browser origins. Default is the Next.js dev origins. |
 | `NEXT_PUBLIC_API_URL` | API origin the frontend calls. Default `http://localhost:8787`. |
 
-`PANTRY_LLM_PROVIDER=fake` keeps cook proposals and sentence parsing offline. Chat plans with rules in that mode, and it does not call a model.
+`PANTRY_LLM_PROVIDER=fake` keeps cook proposals, sentence parsing, and chat offline.
+
+### How chat uses the model
+
+Chat is hybrid. Known commands such as "2 leeks", "remove the leeks", "what's in the pantry", and "something warm" are read by rules and never leave the machine. Anything the rules cannot read goes to the chat model with a bounded snapshot: each pantry item's quantity, unit, and expiry (with an `expired` flag), the last few cooked meals, the open meal, any open confirmation, and the last few messages. The model returns a short reply and at most one action. The app checks that action and runs it through the same pantry, cook, and meal services as every other route.
+
+Removing an item, cooking a proposal, and undoing a meal always wait for a yes or no. While one is open, other changes are held until it is answered, and cook changes replace it. If the model times out, answers badly, or asks for something that cannot run, nothing is written and Pip replies with a short rules message.
+
+Reasoning models can be slow on shared endpoints. Keep `PANTRY_LLM_MODEL` for cook proposals and set `PANTRY_CHAT_MODEL` to something quick for chat.
 
 ## API
 

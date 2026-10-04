@@ -153,7 +153,7 @@ export function CookSessionView({ id }: { id: string }) {
   function recoverFrom(error: ApiError, sentence?: string) {
     const presentation = cookErrorPresentation(error.problem.code, error.problem.detail);
     if (presentation.action === "Add items") {
-      router.push("/");
+      router.push("/pantry");
       return;
     }
     if (presentation.action === "Re-propose") {

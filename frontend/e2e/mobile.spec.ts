@@ -47,7 +47,7 @@ test("cooks from the phone: add, propose, revise, confirm", async ({ page, reque
   await deleteNamed(request, "Spec Leeks");
   await deleteNamed(request, "Spec Eggs");
 
-  await page.goto("/");
+  await page.goto("/pantry");
   await expect(page.getByRole("navigation", { name: "Mobile" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeHidden();
   await expect(page.getByRole("heading", { name: "Pantry", exact: true })).toBeVisible();
@@ -67,7 +67,7 @@ test("cooks from the phone: add, propose, revise, confirm", async ({ page, reque
   await page.getByRole("button", { name: "Revise" }).click();
   await page.getByRole("textbox", { name: "Revision note" }).fill("fewer steps");
   await page.getByRole("button", { name: "Send revision" }).click();
-  await expect(page.getByText("Attempt 2")).toBeVisible();
+  await expect(page.getByText("Attempt 2").first()).toBeVisible();
 
   await page.getByRole("button", { name: "Confirm" }).click();
   await expect(page.getByText("Cooked. Pantry updated.")).toBeVisible();

@@ -3,12 +3,14 @@
 import Link from "next/link";
 
 import { ProposalCard, type PantryAmount } from "@/components/cook/proposal-card";
+import { ChatPendingCard } from "@/components/chat/chat-pending-card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ChatCard, Item } from "@/lib/api";
+import { cookErrorPresentation } from "@/lib/cook";
 import { formatExpiry, localISODate, urgencyOf } from "@/lib/pantry";
 
 function pantryMap(items: Item[]): Record<string, PantryAmount> {
@@ -29,6 +31,9 @@ export function ChatCards({
   cards,
   pantry,
   busy,
+  messageId,
+  openPendingId,
+  liveCookCardKey,
   onConfirmPending,
   onCancelPending,
   onRevise,
@@ -38,6 +43,14 @@ export function ChatCards({
   cards: ChatCard[];
   pantry: Item[];
   busy: boolean;
+  messageId?: string;
+  /** Id of the confirmation still waiting, or null. Leave out to treat every card as live. */
+  openPendingId?: string | null;
+  /**
+   * `${messageId}:${index}` of the recipe that can still be cooked.
+   * Leave out to keep every recipe actionable. Null means none of them are.
+   */
+  liveCookCardKey?: string | null;
   onConfirmPending: (pendingId: string, acknowledgeExpired: boolean) => void;
   onCancelPending: (pendingId: string) => void;
   onRevise: (note: string) => void;
@@ -51,6 +64,20 @@ export function ChatCards({
     <div className="mt-3 flex flex-col gap-3">
       {cards.map((card, index) => {
         const key = card.pending_id ?? `${card.type}-${index}`;
+        // Only the newest confirmation can still be answered. Older ones were
+        // answered or replaced, so they read as history instead of live buttons.
+        if (
+          card.type === "pending" &&
+          card.pending_id &&
+          openPendingId !== undefined &&
+          card.pending_id !== openPendingId
+        ) {
+          return (
+            <p key={key} className="text-sm text-muted-foreground">
+              {card.title} Already answered.
+            </p>
+          );
+        }
         if (card.type === "pantry") {
           const today = localISODate(new Date());
           return (
@@ -112,45 +139,61 @@ export function ChatCards({
 
         if (card.type === "meals") {
           return (
-            <div key={key} className="rounded-2xl border border-border/80 bg-card/80 p-3 shadow-sm">
-              <p className="text-sm font-medium">{card.title}</p>
-              <ul className="mt-2 space-y-1 text-sm">
-                {card.meals.map((meal) => (
-                  <li key={meal.id}>
-                    <Link href={`/meals/${meal.id}`} className="text-primary">
-                      {meal.title}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <Card key={key} className="gap-3 rounded-2xl py-4 shadow-sm">
+              <CardHeader className="px-4">
+                <CardTitle className="text-sm">{card.title}</CardTitle>
+              </CardHeader>
+              {card.meals.length > 0 ? (
+                <CardContent className="px-4">
+                  <ul className="space-y-1 text-sm">
+                    {card.meals.map((meal) => (
+                      <li key={meal.id}>
+                        <Link href={`/meals/${meal.id}`} className="text-primary">
+                          {meal.title}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              ) : null}
+            </Card>
           );
         }
 
         if (card.type === "meal" && card.meal) {
           return (
-            <div key={key} className="rounded-2xl border border-border/80 bg-card/80 p-3 shadow-sm">
-              <p className="text-sm font-medium">{card.title}</p>
-              <Link
-                href={`/meals/${card.meal.id}`}
-                className="mt-2 inline-block text-xs font-medium text-primary"
-              >
-                Open meal
-              </Link>
-            </div>
+            <Card key={key} className="gap-2 rounded-2xl py-4 shadow-sm">
+              <CardHeader className="px-4">
+                <CardTitle className="text-sm">{card.title}</CardTitle>
+              </CardHeader>
+              <CardContent className="px-4">
+                <Link href={`/meals/${card.meal.id}`} className="text-xs font-medium text-primary">
+                  Open meal
+                </Link>
+              </CardContent>
+            </Card>
           );
         }
 
-        if (card.type === "error" || card.type === "note") {
+        if (card.type === "error") {
+          const shown = cookErrorPresentation(card.error?.code, card.error?.detail ?? card.title);
           return (
-            <p
-              key={key}
-              className={
-                card.type === "error"
-                  ? "rounded-2xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm"
-                  : "text-sm text-muted-foreground"
-              }
-            >
+            <Alert key={key} variant="destructive" className="rounded-2xl">
+              <AlertTitle>{shown.message}</AlertTitle>
+              {card.error?.code === "empty_pantry" ? (
+                <AlertDescription>
+                  <Link href="/pantry" className="font-medium underline">
+                    Add items
+                  </Link>
+                </AlertDescription>
+              ) : null}
+            </Alert>
+          );
+        }
+
+        if (card.type === "note") {
+          return (
+            <p key={key} className="text-sm text-muted-foreground">
               {card.title}
             </p>
           );
@@ -159,12 +202,16 @@ export function ChatCards({
         const proposal = card.proposal;
         if ((card.type === "proposal" || card.pending_kind === "confirm_cook") && proposal) {
           const pendingId = card.pending_id;
+          const cardKey = `${messageId ?? ""}:${index}`;
+          const actionsLive = liveCookCardKey === undefined || liveCookCardKey === cardKey;
           return (
             <ProposalCard
               key={key}
               proposal={proposal}
               pantry={amounts}
               busy={busy}
+              showActions={actionsLive}
+              pinActions={false}
               onConfirm={(acknowledgeExpired) => {
                 if (pendingId) onConfirmPending(pendingId, acknowledgeExpired);
                 else onAskConfirm();
@@ -176,27 +223,15 @@ export function ChatCards({
         }
 
         if (card.type === "pending" && card.pending_id) {
+          const pendingId = card.pending_id;
           return (
-            <div key={key} className="rounded-2xl border border-border/80 bg-card/80 p-3 shadow-sm">
-              <p className="text-sm font-medium">{card.title}</p>
-              <div className="mt-3 flex gap-2">
-                <Button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onConfirmPending(card.pending_id!, false)}
-                >
-                  Confirm
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => onCancelPending(card.pending_id!)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
+            <ChatPendingCard
+              key={key}
+              card={card}
+              busy={busy}
+              onConfirm={() => onConfirmPending(pendingId, false)}
+              onCancel={() => onCancelPending(pendingId)}
+            />
           );
         }
 

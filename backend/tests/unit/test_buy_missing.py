@@ -105,7 +105,7 @@ class TestBuyMissingLine:
         db_session.commit()
 
         assert bought.created is True
-        assert bought.item.name == "butter"
+        assert bought.item.name == "Butter"
         assert bought.quantity.unit == Unit.G
         assert Decimal(str(bought.item.quantity_base)) == Decimal("200")
         db_session.refresh(meal)

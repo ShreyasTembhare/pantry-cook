@@ -9,6 +9,8 @@ export function ChatMessage({
   message,
   pantry,
   busy,
+  openPendingId,
+  liveCookCardKey,
   onConfirmPending,
   onCancelPending,
   onRevise,
@@ -18,6 +20,8 @@ export function ChatMessage({
   message: ChatMessageModel;
   pantry: Item[];
   busy: boolean;
+  openPendingId?: string | null;
+  liveCookCardKey?: string | null;
   onConfirmPending: (pendingId: string, acknowledgeExpired: boolean) => void;
   onCancelPending: (pendingId: string) => void;
   onRevise: (note: string) => void;
@@ -26,6 +30,7 @@ export function ChatMessage({
 }) {
   const mine = message.role === "user";
   const pending = message.id.startsWith("pending-user-");
+  const failed = message.id.startsWith("failed-user-");
   return (
     <div className={cn("flex gap-3", mine ? "justify-end" : "justify-start")}>
       {mine ? null : <Pip mood="happy" className="mt-1 h-10 w-9 shrink-0" />}
@@ -37,17 +42,32 @@ export function ChatMessage({
               ? cn(
                   "rounded-br-lg bg-primary text-primary-foreground",
                   pending && "opacity-80",
+                  failed && "opacity-70 ring-2 ring-destructive/60",
                 )
               : "rounded-bl-lg border border-border/70 bg-card/90 backdrop-blur",
           )}
         >
+          <span className="sr-only">{mine ? "You said: " : "Pip said: "}</span>
           {message.content}
         </div>
+        {pending || failed ? (
+          <p
+            className={cn(
+              "mt-1 text-right text-xs",
+              failed ? "text-destructive" : "text-muted-foreground",
+            )}
+          >
+            {failed ? "Not sent" : "Sending…"}
+          </p>
+        ) : null}
         {mine ? null : (
           <ChatCards
             cards={message.cards}
             pantry={pantry}
             busy={busy}
+            messageId={message.id}
+            openPendingId={openPendingId}
+            liveCookCardKey={liveCookCardKey}
             onConfirmPending={onConfirmPending}
             onCancelPending={onCancelPending}
             onRevise={onRevise}

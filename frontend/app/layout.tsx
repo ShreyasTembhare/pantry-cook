@@ -1,6 +1,6 @@
-import type { Metadata } from "next";
-import { Geist } from "next/font/google";
-import { Fraunces } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Fraunces, Geist } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { Shell } from "@/components/shell/shell";
@@ -17,6 +17,12 @@ const fraunces = Fraunces({
   axes: ["opsz"],
 });
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
 export const metadata: Metadata = {
   title: "Pantry Cook",
   description: "Track your pantry and cook with what you have",
@@ -29,14 +35,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${geistSans.variable} ${fraunces.variable} h-full`} suppressHydrationWarning>
-      <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var d=document.documentElement;var c=localStorage.getItem('theme');if(c==='dark'||((!c||c==='system')&&window.matchMedia('(prefers-color-scheme:dark)').matches)){d.classList.add('dark')}}catch(e){}})()`,
-          }}
-        />
-      </head>
       <body className="h-full font-sans antialiased">
+        <Script id="theme-boot" strategy="beforeInteractive">
+          {`(function(){try{var d=document.documentElement;var c=localStorage.getItem('theme');if(c==='dark'||((!c||c==='system')&&window.matchMedia('(prefers-color-scheme:dark)').matches)){d.classList.add('dark')}}catch(e){}})()`}
+        </Script>
         <Providers>
           <Shell>{children}</Shell>
         </Providers>

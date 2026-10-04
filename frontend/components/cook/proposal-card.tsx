@@ -37,6 +37,8 @@ type ProposalCardProps = {
   staleMessage?: string;
   busy?: boolean;
   showActions?: boolean;
+  /** Stick the actions to the scroll edge. Off when the card sits inside another scroller. */
+  pinActions?: boolean;
   today?: string;
   onConfirm: (acknowledgeExpired: boolean) => void;
   onRevise: (note: string) => void;
@@ -62,6 +64,7 @@ export function ProposalCard({
   staleMessage = "Your pantry changed since this was proposed.",
   busy = false,
   showActions = true,
+  pinActions = true,
   today,
   onConfirm,
   onRevise,
@@ -269,7 +272,12 @@ export function ProposalCard({
       </div>
 
       {showActions ? (
-        <footer className="sticky bottom-0 rounded-b-lg border-t border-border bg-card px-4 py-3 sm:px-5">
+        <footer
+          className={cn(
+            "rounded-b-lg border-t border-border bg-card px-4 py-3 sm:px-5",
+            pinActions && "sticky bottom-0",
+          )}
+        >
           {revising ? (
             <form
               onSubmit={(event) => {
