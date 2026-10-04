@@ -7,7 +7,10 @@ import { toast } from "sonner";
 import { ChatComposer } from "@/components/chat/chat-composer";
 import { ChatMessage } from "@/components/chat/chat-message";
 import { Pip } from "@/components/mascot/pip";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   ApiError,
   cancelChatPending,
@@ -36,6 +39,7 @@ export function ChatHome() {
   const itemsQuery = useQuery({ queryKey: ["items"], queryFn: listItems });
   const { thinking, send } = useChatTurn();
   const [pendingUser, setPendingUser] = useState<ChatMessageModel | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const today = localISODate(new Date());
@@ -120,9 +124,12 @@ export function ChatHome() {
       const turn = await send(trimmed);
       mergeTurn(turn);
       setPendingUser(null);
+      setSendError(null);
     } catch (error) {
       setPendingUser(null);
-      toast.error(error instanceof ApiError ? error.message : "Pip couldn't reply. Try again.");
+      const message = error instanceof ApiError ? error.message : "Pip couldn't reply. Try again.";
+      setSendError(message);
+      toast.error(message);
     }
   }
 
@@ -132,21 +139,28 @@ export function ChatHome() {
 
   return (
     <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <ScrollArea className="h-full min-h-0 flex-1">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 py-6 sm:px-6">
           {threadQuery.isError ? (
-            <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
-              <p>Couldn&apos;t load your conversation.</p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-2"
-                onClick={() => void threadQuery.refetch()}
-              >
-                Retry
-              </Button>
-            </div>
+            <Alert variant="destructive">
+              <AlertTitle>Couldn&apos;t load your conversation.</AlertTitle>
+              <AlertDescription>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void threadQuery.refetch()}
+                >
+                  Retry
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {sendError ? (
+            <Alert variant="destructive">
+              <AlertTitle>Message didn&apos;t send</AlertTitle>
+              <AlertDescription>{sendError}</AlertDescription>
+            </Alert>
           ) : null}
           {threadQuery.isPending && messages.length === 0 ? (
             <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
@@ -154,14 +168,20 @@ export function ChatHome() {
             </div>
           ) : null}
           {showWelcome ? (
-            <div className="flex flex-col items-center px-4 pb-8 pt-2 text-center">
-              <Pip className="h-20 w-16" />
-              <h2 className="mt-4 font-serif text-3xl tracking-tight">What should we cook?</h2>
-              <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-                Tell Pip what&apos;s in the kitchen, ask for a meal, or change a recipe until it
-                fits tonight.
-              </p>
-            </div>
+            <Empty className="border-0 bg-transparent px-4 py-8">
+              <EmptyHeader>
+                <EmptyMedia>
+                  <Pip className="h-20 w-16" />
+                </EmptyMedia>
+                <EmptyTitle className="font-serif text-3xl font-normal tracking-tight">
+                  What should we cook?
+                </EmptyTitle>
+                <EmptyDescription>
+                  Tell Pip what&apos;s in the kitchen, ask for a meal, or change a recipe until it
+                  fits tonight.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : null}
           {visible.map((message) => (
             <ChatMessage
@@ -184,7 +204,7 @@ export function ChatHome() {
           ) : null}
           <div ref={bottomRef} aria-hidden />
         </div>
-      </div>
+      </ScrollArea>
       <ChatComposer busy={busy} suggestions={chips} onSend={(text) => void say(text)} />
     </div>
   );

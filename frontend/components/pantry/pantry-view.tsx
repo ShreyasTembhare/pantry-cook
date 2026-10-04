@@ -10,7 +10,11 @@ import { PantryRow } from "@/components/pantry/pantry-row";
 import { PantrySkeleton } from "@/components/pantry/pantry-skeleton";
 import { QuickAdd, type QuickAddHandle } from "@/components/pantry/quick-add";
 import { SentenceAdd } from "@/components/pantry/sentence-add";
+import { PageHeader } from "@/components/chrome/page-header";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
   SheetContent,
@@ -225,14 +229,14 @@ export function PantryView() {
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
-      <header className="mb-6">
-        <h2 className="font-serif text-[1.75rem] leading-none tracking-tight">Pantry</h2>
-        <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
-          {itemsQuery.isSuccess && items.length > 0
+      <PageHeader
+        title="Pantry"
+        lede={
+          itemsQuery.isSuccess && items.length > 0
             ? `${items.length} ${items.length === 1 ? "item" : "items"}, soonest first.`
-            : "What's in the fridge and cupboard, soonest first."}
-        </p>
-      </header>
+            : "What's in the fridge and cupboard, soonest first."
+        }
+      />
 
       <div className="mb-6">
         <SentenceAdd
@@ -252,6 +256,7 @@ export function PantryView() {
           }}
         />
       </div>
+      <Separator className="mb-6" />
       <QuickAdd ref={quickAddRef} onSubmit={handleCreate} />
       {conflict ? (
         <DuplicatePrompt
@@ -270,49 +275,50 @@ export function PantryView() {
 
       <div className="mt-6">
         {showError ? (
-          <div
-            role="alert"
-            className="mb-4 flex flex-col gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
-          >
-            <p className="text-sm leading-relaxed">
-              Couldn&apos;t load the pantry.{" "}
+          <Alert variant="destructive" className="mb-4">
+            <AlertTitle>Couldn&apos;t load the pantry.</AlertTitle>
+            <AlertDescription>
               {itemsQuery.error instanceof ApiError
                 ? itemsQuery.error.problem.detail
                 : "The list didn't come back."}
-            </p>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-11 shrink-0 lg:h-9"
-              onClick={() => void itemsQuery.refetch()}
-            >
-              Retry
-            </Button>
-          </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-2 h-11 lg:h-9"
+                onClick={() => void itemsQuery.refetch()}
+              >
+                Retry
+              </Button>
+            </AlertDescription>
+          </Alert>
         ) : null}
 
         {showSkeleton ? <PantrySkeleton /> : null}
 
         {showEmpty ? (
-          <div className="py-8">
-            <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-              Your pantry is empty. Add what&apos;s in the fridge and cupboard — the cook uses what
-              you actually have.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {SAMPLE_DRAFTS.map((sample) => (
-                <Button
-                  key={sample.label}
-                  type="button"
-                  variant="outline"
-                  className="h-11 lg:h-9"
-                  onClick={() => quickAddRef.current?.prefill(sample.draft)}
-                >
-                  {sample.label}
-                </Button>
-              ))}
-            </div>
-          </div>
+          <Empty className="border-border/80 bg-card/40">
+            <EmptyHeader>
+              <EmptyTitle className="font-serif text-2xl font-normal">Your pantry is empty</EmptyTitle>
+              <EmptyDescription>
+                Add what&apos;s in the fridge and cupboard — the cook uses what you actually have.
+              </EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <div className="flex flex-wrap justify-center gap-2">
+                {SAMPLE_DRAFTS.map((sample) => (
+                  <Button
+                    key={sample.label}
+                    type="button"
+                    variant="outline"
+                    className="h-11 lg:h-9"
+                    onClick={() => quickAddRef.current?.prefill(sample.draft)}
+                  >
+                    {sample.label}
+                  </Button>
+                ))}
+              </div>
+            </EmptyContent>
+          </Empty>
         ) : null}
 
         {groups.map((group) => (

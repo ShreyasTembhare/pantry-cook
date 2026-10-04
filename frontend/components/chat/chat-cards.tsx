@@ -3,8 +3,13 @@
 import Link from "next/link";
 
 import { ProposalCard, type PantryAmount } from "@/components/cook/proposal-card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ChatCard, Item } from "@/lib/api";
+import { formatExpiry, localISODate, urgencyOf } from "@/lib/pantry";
 
 function pantryMap(items: Item[]): Record<string, PantryAmount> {
   return Object.fromEntries(
@@ -47,25 +52,61 @@ export function ChatCards({
       {cards.map((card, index) => {
         const key = card.pending_id ?? `${card.type}-${index}`;
         if (card.type === "pantry") {
+          const today = localISODate(new Date());
           return (
-            <div key={key} className="rounded-2xl border border-border/80 bg-card/80 p-3 shadow-sm">
-              <p className="text-sm font-medium">{card.title}</p>
+            <Card key={key} className="gap-3 rounded-2xl py-4 shadow-sm">
+              <CardHeader className="px-4">
+                <CardTitle className="text-sm">{card.title}</CardTitle>
+              </CardHeader>
               {card.items.length > 0 ? (
-                <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-                  {card.items.map((item) => (
-                    <li key={item.id}>
-                      {item.name}{" "}
-                      <span className="tabular-nums">
-                        {item.quantity} {item.unit}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <CardContent className="px-4">
+                  <ul className="space-y-2 text-sm text-muted-foreground">
+                    {card.items.map((item, itemIndex) => {
+                      const urgency = urgencyOf(item, today);
+                      return (
+                        <li key={item.id}>
+                          {itemIndex > 0 ? <Separator className="mb-2" /> : null}
+                          <span className="flex items-center justify-between gap-3">
+                            <span>
+                              {item.name}{" "}
+                              <span className="tabular-nums">
+                                {item.quantity} {item.unit}
+                              </span>
+                            </span>
+                            {item.expires_on ? (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Badge
+                                      variant="outline"
+                                      className={
+                                        urgency === "expired"
+                                          ? "border-transparent bg-expired/10 text-expired"
+                                          : urgency === "soon"
+                                            ? "border-transparent bg-warning/25 text-warning-foreground"
+                                            : undefined
+                                      }
+                                    >
+                                      {urgency === "expired" ? "Expired" : formatExpiry(item.expires_on, today)}
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{formatExpiry(item.expires_on, today)}</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : null}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </CardContent>
               ) : null}
-              <Link href="/pantry" className="mt-2 inline-block text-xs font-medium text-primary">
-                Open pantry
-              </Link>
-            </div>
+              <CardContent className="px-4">
+                <Link href="/pantry" className="text-xs font-medium text-primary">
+                  Open pantry
+                </Link>
+              </CardContent>
+            </Card>
           );
         }
 

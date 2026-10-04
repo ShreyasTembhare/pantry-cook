@@ -5,8 +5,12 @@ import { format, parseISO } from "date-fns";
 import Link from "next/link";
 import { useState } from "react";
 
+import { PageHeader } from "@/components/chrome/page-header";
 import { MealsSkeleton } from "@/components/cook/cook-skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Separator } from "@/components/ui/separator";
 import { ApiError, listMeals, type MealStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -28,13 +32,9 @@ export function MealsList() {
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
-      <header className="mb-6">
-        <h2 className="font-serif text-[1.75rem] leading-none tracking-tight">Meals</h2>
-        <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
-          What you have cooked, newest first.
-        </p>
-      </header>
+      <PageHeader title="Meals" lede="What you have cooked, newest first." />
 
+      <Separator className="mb-4" />
       <div className="mb-4 flex gap-2" role="group" aria-label="Meal status">
         {(
           [
@@ -57,44 +57,48 @@ export function MealsList() {
       </div>
 
       {mealsQuery.isError ? (
-        <div
-          role="alert"
-          className="mb-4 flex flex-col gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <p className="text-sm leading-relaxed">
-            Couldn&apos;t load meals.{" "}
+        <Alert variant="destructive" className="mb-4">
+          <AlertTitle>Couldn&apos;t load meals.</AlertTitle>
+          <AlertDescription>
             {mealsQuery.error instanceof ApiError
               ? mealsQuery.error.problem.detail
               : "The list didn't come back."}
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            className="h-11 shrink-0 lg:h-9"
-            onClick={() => void mealsQuery.refetch()}
-          >
-            Retry
-          </Button>
-        </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-2 h-11 lg:h-9"
+              onClick={() => void mealsQuery.refetch()}
+            >
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
       ) : null}
 
       {mealsQuery.isPending ? <MealsSkeleton /> : null}
 
       {mealsQuery.isSuccess && meals.length === 0 ? (
-        <div className="max-w-md py-4">
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            {status === "cooked"
-              ? "No meals yet. Cook something."
-              : status === "undone"
-                ? "No meals have been undone."
-                : "Nothing is sitting here as a proposal. An unfinished one stays on Cook until you confirm."}
-          </p>
+        <Empty className="border-border/80 bg-card/40">
+          <EmptyHeader>
+            <EmptyTitle className="font-serif text-2xl font-normal">
+              {status === "cooked" ? "No meals yet" : status === "undone" ? "Nothing undone" : "No proposals"}
+            </EmptyTitle>
+            <EmptyDescription>
+              {status === "cooked"
+                ? "Cook something from what is in the pantry."
+                : status === "undone"
+                  ? "No meals have been undone."
+                  : "Nothing is sitting here as a proposal. An unfinished one stays on Cook until you confirm."}
+            </EmptyDescription>
+          </EmptyHeader>
           {status === "cooked" ? (
-            <Button asChild className="mt-4 h-11 lg:h-9">
-              <Link href="/cook">Cook something</Link>
-            </Button>
+            <EmptyContent>
+              <Button asChild className="h-11 lg:h-9">
+                <Link href="/cook">Cook something</Link>
+              </Button>
+            </EmptyContent>
           ) : null}
-        </div>
+        </Empty>
       ) : null}
 
       {meals.length > 0 ? (
