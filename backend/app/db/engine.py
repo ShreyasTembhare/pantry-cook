@@ -1,23 +1,24 @@
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
 
 
-def _set_sqlite_pragmas(dbapi_conn: object, _connection_record: object) -> None:
-    cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
+def psycopg_conninfo(database_url: str) -> str:
+    """LangGraph's Postgres saver speaks libpq URLs, not the SQLAlchemy driver prefix."""
+    prefix = "postgresql+psycopg://"
+    if database_url.startswith(prefix):
+        return "postgresql://" + database_url.removeprefix(prefix)
+    return database_url
 
 
-def get_engine() -> Engine:
-    settings.db_path.parent.mkdir(parents=True, exist_ok=True)
-    url = f"sqlite:///{settings.db_path.resolve()}"
-    eng = create_engine(url, echo=False)
-    event.listen(eng, "connect", _set_sqlite_pragmas)
-    return eng
+def get_engine(database_url: str | None = None) -> Engine:
+    return create_engine(
+        database_url or settings.database_url,
+        echo=False,
+        pool_pre_ping=True,
+    )
 
 
 engine = get_engine()

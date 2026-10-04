@@ -1,45 +1,29 @@
 """Tests for the /api/items endpoints — CRUD, error responses."""
 
-import tempfile
 from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.deps import get_db
-from app.db.models import Base
 from app.main import create_app
 
 
 @pytest.fixture
-def client() -> Generator[TestClient, None, None]:
-    with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=True) as f:
-        url = f"sqlite:///{f.name}"
-        engine = create_engine(url)
+def client(session_factory: sessionmaker[Session]) -> Generator[TestClient, None, None]:
+    def override_db() -> Generator[Session, None, None]:
+        session = session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
 
-        def set_pragmas(dbapi_conn: object, _rec: object) -> None:
-            cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
+    app = create_app()
+    app.dependency_overrides[get_db] = override_db
 
-        event.listen(engine, "connect", set_pragmas)
-        Base.metadata.create_all(bind=engine)
-        session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-
-        def override_db() -> Generator[Session, None, None]:
-            session = session_factory()
-            try:
-                yield session
-            finally:
-                session.close()
-
-        app = create_app()
-        app.dependency_overrides[get_db] = override_db
-
-        with TestClient(app) as tc:
-            yield tc
+    with TestClient(app) as tc:
+        yield tc
 
 
 class TestCreateItem:

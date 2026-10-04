@@ -19,7 +19,6 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Item
 from app.db.repositories import ItemRepository
-from app.domain.commit import _listen_immediate
 from app.domain.errors import (
     DomainError,
     NonIntegerCountError,
@@ -130,10 +129,19 @@ def rules_parse_sentence(sentence: str) -> DraftPantrySentence:
 
 
 def parse_pantry_sentence(sentence: str, llm: BaseChatModel) -> ResolvedPantryBatch:
-    """Ask the chef for a batch, then accept it only if the whole batch validates."""
+    """Parse a pantry sentence; rules first, hosted model only when rules cannot."""
     text = sentence.strip()
     if not text:
         raise SentenceUnparsedError(UNREADABLE_SENTENCE)
+    try:
+        return normalise_draft(rules_parse_sentence(text))
+    except SentenceUnparsedError as rules_error:
+        ruled_error = rules_error
+    from app.graph.llm import FakeMealModel, llm_mode
+
+    scripted = isinstance(llm, FakeMealModel) and bool(llm.script)
+    if not scripted and (isinstance(llm, FakeMealModel) or llm_mode() == "fake"):
+        raise ruled_error
     try:
         raw = llm.with_structured_output(DraftPantrySentence).invoke(messages_for_sentence(text))
     except DomainError:
@@ -207,8 +215,7 @@ def preview_lines(
 
 def commit_parsed_items(db: Session, batch: ResolvedPantryBatch) -> list[Item]:
     """Create or add every line. The caller commits, and rolls back on any error."""
-    _listen_immediate(db)
-    planned = _plan(db, batch)
+    planned = _plan(db, batch, lock=True)
     repo = ItemRepository(db)
     saved: list[Item] = []
     for step in planned:
@@ -236,11 +243,11 @@ class _Step:
     existing_id: str | None
 
 
-def _plan(db: Session, batch: ResolvedPantryBatch) -> list[_Step]:
+def _plan(db: Session, batch: ResolvedPantryBatch, *, lock: bool = False) -> list[_Step]:
     repo = ItemRepository(db)
     steps: list[_Step] = []
     for line in batch.items:
-        existing = repo.find_by_name_key(normalise_name_key(line.name))
+        existing = repo.find_by_name_key(normalise_name_key(line.name), lock=lock)
         incoming = Quantity(line.quantity, line.unit)
         if existing is None:
             steps.append(_Step(line=line, action="create", existing_id=None))

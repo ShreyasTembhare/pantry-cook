@@ -152,3 +152,82 @@ class CookSession(Base):
         ),
         Index("ix_cook_sessions_status_expires_at", "status", "expires_at"),
     )
+
+
+class ChatThread(Base):
+    """The single home conversation. One row for this single-user app."""
+
+    __tablename__ = "chat_threads"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    active_cook_session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    messages: Mapped[list[ChatMessage]] = relationship(
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        order_by="ChatMessage.created_at",
+    )
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    thread_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("chat_threads.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(String, nullable=False, default="")
+    cards: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
+
+    thread: Mapped[ChatThread] = relationship(back_populates="messages")
+
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('user', 'assistant', 'system')",
+            name="ck_chat_messages_role",
+        ),
+        Index("ix_chat_messages_thread_id", "thread_id"),
+    )
+
+
+class ChatPending(Base):
+    """A destructive or committing action waiting for an explicit yes."""
+
+    __tablename__ = "chat_pending"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    thread_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("chat_threads.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('delete_item', 'confirm_cook', 'undo_meal')",
+            name="ck_chat_pending_kind",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'confirmed', 'cancelled')",
+            name="ck_chat_pending_status",
+        ),
+        Index("ix_chat_pending_thread_status", "thread_id", "status"),
+    )

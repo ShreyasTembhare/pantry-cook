@@ -54,8 +54,11 @@ class ItemRepository:
             raise ItemNotFoundError(item_id)
         return item
 
-    def find_by_name_key(self, name_key: str) -> Item | None:
-        return self._db.execute(select(Item).where(Item.name_key == name_key)).scalar_one_or_none()
+    def find_by_name_key(self, name_key: str, *, lock: bool = False) -> Item | None:
+        stmt = select(Item).where(Item.name_key == name_key)
+        if lock:
+            stmt = stmt.with_for_update()
+        return self._db.execute(stmt).scalar_one_or_none()
 
     def list(
         self,

@@ -13,8 +13,10 @@ dependencies = [
     "alembic>=1.14.0",
     "langchain>=0.3.0",
     "langchain-core>=0.3.0",
+    "langchain-openai>=0.3.0",
     "langgraph>=0.2.0",
-    "langgraph-checkpoint-sqlite>=2.0.0",
+    "langgraph-checkpoint-postgres>=2.0.0",
+    "psycopg[binary]>=3.2.0",
     "structlog>=24.4.0",
 ]
 
@@ -68,7 +70,7 @@ disallow_untyped_defs = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["langchain.*", "langgraph.*", "langgraph_checkpoint_sqlite.*"]
+module = ["langchain.*", "langgraph.*", "langgraph.checkpoint.postgres.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

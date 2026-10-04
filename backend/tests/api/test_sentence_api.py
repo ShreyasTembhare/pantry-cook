@@ -1,47 +1,32 @@
 """POST /api/items/sentence previews, then saves the whole batch or nothing."""
 
-import tempfile
 from collections.abc import Generator
 from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.deps import get_db, get_sentence_llm
-from app.db.models import Base
 from app.graph.llm import FakeMealModel
 from app.main import create_app
 from app.schemas.quick_add import DraftPantryLine, DraftPantrySentence
 
 
 @pytest.fixture
-def client() -> Generator[TestClient, None, None]:
-    with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=True) as handle:
-        engine = create_engine(f"sqlite:///{handle.name}")
+def client(session_factory: sessionmaker[Session]) -> Generator[TestClient, None, None]:
+    def override_db() -> Generator[Session, None, None]:
+        session = session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
 
-        def set_pragmas(dbapi_conn: object, _rec: object) -> None:
-            cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
+    app = create_app()
+    app.dependency_overrides[get_db] = override_db
 
-        event.listen(engine, "connect", set_pragmas)
-        Base.metadata.create_all(bind=engine)
-        session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-
-        def override_db() -> Generator[Session, None, None]:
-            session = session_factory()
-            try:
-                yield session
-            finally:
-                session.close()
-
-        app = create_app()
-        app.dependency_overrides[get_db] = override_db
-
-        with TestClient(app) as test_client:
-            yield test_client
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def _preview(client: TestClient, sentence: str) -> object:
@@ -133,7 +118,7 @@ class TestSentenceSave:
 
     def test_bad_model_output_does_not_write(self, client: TestClient) -> None:
         client.app.dependency_overrides[get_sentence_llm] = lambda: FakeMealModel(script=["nope"])
-        response = _preview(client, "2 leeks and 500 g chicken")
+        response = _preview(client, "something tasty please")
         assert response.status_code == 422
         assert response.json()["code"] == "sentence_unparsed"
         assert client.get("/api/items").json() == []

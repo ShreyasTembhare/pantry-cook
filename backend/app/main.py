@@ -51,10 +51,7 @@ async def _maintenance_loop(stop: asyncio.Event) -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     from app.api.deps import close_graph, init_graph
-    from app.db.engine import engine
-    from app.db.models import Base
 
-    Base.metadata.create_all(bind=engine)
     init_graph()
     stop = asyncio.Event()
     task: asyncio.Task[None] | None = None
@@ -93,6 +90,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(DomainError, domain_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
 
+    from app.api.chat import router as chat_router
     from app.api.cook import router as cook_router
     from app.api.cook_stream import router as cook_stream_router
     from app.api.health import router as health_router
@@ -100,6 +98,7 @@ def create_app() -> FastAPI:
     from app.api.meals import router as meals_router
 
     app.include_router(health_router)
+    app.include_router(chat_router)
     app.include_router(items_router)
     app.include_router(cook_router)
     app.include_router(cook_stream_router)

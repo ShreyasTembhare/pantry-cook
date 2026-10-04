@@ -104,20 +104,23 @@ def parse_sentence(state: CookState, llm: BaseChatModel) -> dict[str, Any]:
         HumanMessage(content=_context_message(state)),
     ]
     started = time.perf_counter()
-    try:
-        constraints = _invoke_structured(llm, Constraints, messages)
-    except StructuredOutputError as exc:
-        result = {
+    result = _structured_or_llm(
+        llm,
+        Constraints,
+        messages,
+        on_ok=lambda constraints: {
+            "constraints": constraints.model_dump(mode="json"),
+            "error": None,
+        },
+        on_invalid=lambda exc: {
             "error": {
                 "code": "llm_output_invalid",
                 "detail": "The proposal came back garbled.",
                 "cause": exc.detail,
             }
-        }
-    except LlmCallError as exc:
-        result = {"error": _llm_payload(exc)}
-    else:
-        result = {"constraints": constraints.model_dump(mode="json"), "error": None}
+        },
+        on_llm_error=lambda exc: {"error": _llm_payload(exc)},
+    )
     _log_node("parse_sentence", state, started)
     return result
 
@@ -129,7 +132,7 @@ def propose_meal(state: CookState, llm: BaseChatModel) -> dict[str, Any]:
     ]
     started = time.perf_counter()
     try:
-        proposal = _invoke_structured(llm, MealProposal, messages)
+        proposal = _structured_or_llm_value(llm, MealProposal, messages)
     except StructuredOutputError as exc:
         result = {
             "proposal": None,
@@ -516,6 +519,33 @@ def _retry_after(exc: BaseException) -> int | None:
     return value
 
 
+def _structured_or_llm_value(
+    llm: BaseChatModel,
+    schema: type[BaseModel],
+    messages: list[Any],
+) -> BaseModel:
+    """Call the model. The offline chef applies its own rules when nothing is scripted."""
+    return _invoke_structured(llm, schema, messages)
+
+
+def _structured_or_llm(
+    llm: BaseChatModel,
+    schema: type[BaseModel],
+    messages: list[Any],
+    *,
+    on_ok: Callable[[BaseModel], dict[str, Any]],
+    on_invalid: Callable[[StructuredOutputError], dict[str, Any]],
+    on_llm_error: Callable[[LlmCallError], dict[str, Any]],
+) -> dict[str, Any]:
+    try:
+        value = _structured_or_llm_value(llm, schema, messages)
+    except StructuredOutputError as exc:
+        return on_invalid(exc)
+    except LlmCallError as exc:
+        return on_llm_error(exc)
+    return on_ok(value)
+
+
 def _invoke_once(llm: BaseChatModel, schema: type[BaseModel], messages: list[Any]) -> Any:
     try:
         return llm.with_structured_output(schema).invoke(messages)
@@ -537,12 +567,14 @@ def _invoke_structured(
     schema: type[BaseModel],
     messages: list[Any],
     *,
-    wall_seconds: float = _NODE_WALL_SECONDS,
+    wall_seconds: float | None = None,
 ) -> Any:
     """Call the model, retrying schema mistakes. Timeouts and 429s are not retried.
 
     The node gives up after ``wall_seconds`` even if the client is still retrying.
     """
+    if wall_seconds is None:
+        wall_seconds = max(_NODE_WALL_SECONDS, float(settings.llm_timeout or 30) + 30.0)
     deadline = time.monotonic() + wall_seconds
     last = "The model returned nothing."
     current = list(messages)

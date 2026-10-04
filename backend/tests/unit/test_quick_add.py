@@ -97,19 +97,18 @@ class TestRulesParse:
 
 
 class TestModelBoundary:
-    def test_fake_model_is_the_default_parser(self) -> None:
+    def test_readable_sentence_stays_on_the_rules(self) -> None:
         model = FakeMealModel()
         batch = parse_pantry_sentence("6 eggs", model)
         assert batch.items[0].name == "Eggs"
         assert batch.items[0].unit == Unit.COUNT
-        assert model.received
+        assert model.received == []
 
     def test_bad_model_output_is_a_clear_error(self) -> None:
         model = FakeMealModel(script=["not json"])
         with pytest.raises(SentenceUnparsedError) as caught:
-            parse_pantry_sentence("2 leeks and 500 g chicken", model)
+            parse_pantry_sentence("something tasty please", model)
         assert caught.value.code == "sentence_unparsed"
-        assert "2 leeks" in caught.value.detail
 
     def test_scripted_batch_still_goes_through_pydantic(self) -> None:
         model = FakeMealModel(

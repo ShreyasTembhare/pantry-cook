@@ -8,11 +8,10 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import MemorySaver
-from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.deps import get_db, get_graph
-from app.db.models import Base, Meal
+from app.db.models import Meal
 from app.graph.builder import build_graph
 from app.graph.llm import FakeMealModel
 from app.main import create_app
@@ -20,36 +19,22 @@ from app.schemas.llm import MealProposal, ProposedMissingLine, ProposedUseLine
 
 
 @pytest.fixture
-def cook() -> Generator[SimpleNamespace, None, None]:
-    import tempfile
+def cook(session_factory: sessionmaker[Session]) -> Generator[SimpleNamespace, None, None]:
+    def override_db() -> Generator[Session, None, None]:
+        session = session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
 
-    with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=True) as handle:
-        engine = create_engine(f"sqlite:///{handle.name}")
+    llm = FakeMealModel()
+    graph = build_graph(MemorySaver(), llm, session_factory)
+    app = create_app()
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_graph] = lambda: graph
 
-        def set_pragmas(dbapi_conn: object, _rec: object) -> None:
-            cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-
-        event.listen(engine, "connect", set_pragmas)
-        Base.metadata.create_all(bind=engine)
-        factory = sessionmaker(bind=engine, expire_on_commit=False)
-
-        def override_db() -> Generator[Session, None, None]:
-            session = factory()
-            try:
-                yield session
-            finally:
-                session.close()
-
-        llm = FakeMealModel()
-        graph = build_graph(MemorySaver(), llm, factory)
-        app = create_app()
-        app.dependency_overrides[get_db] = override_db
-        app.dependency_overrides[get_graph] = lambda: graph
-
-        with TestClient(app) as client:
-            yield SimpleNamespace(client=client, llm=llm, factory=factory)
+    with TestClient(app) as client:
+        yield SimpleNamespace(client=client, llm=llm, factory=session_factory)
 
 
 def _add(
@@ -152,7 +137,13 @@ class TestCookApi:
         assert response.json()["code"] == "duplicate_item"
 
     def test_ambiguous_sentence_explains_the_choice(self, cook: SimpleNamespace) -> None:
-        _add(cook.client, "Spinach", "200", "g", expires_on="2026-10-01")
+        _add(
+            cook.client,
+            "Spinach",
+            "200",
+            "g",
+            expires_on=(date.today() + timedelta(days=3)).isoformat(),
+        )
         body = _start(cook.client, "food")
         assert "open-ended" in str(body["proposal"]["rationale"])
 

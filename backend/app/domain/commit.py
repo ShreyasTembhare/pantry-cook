@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import event, select
-from sqlalchemy.orm import Session, SessionTransaction
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.db.models import CookSession, Item, Meal, MealLine
 from app.domain.errors import (
@@ -23,33 +23,6 @@ from app.schemas.llm import MealProposal, PantryRow, ProposedMissingLine, Propos
 
 def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
-
-
-def _listen_immediate(db: Session) -> None:
-    """Take a reserved SQLite lock before the version re-read.
-
-    ``BEGIN IMMEDIATE`` makes the version check and the quantity write one
-    critical section, so a second cook cannot commit against the same items
-    in between. The listener is session-local and does not change other
-    transactions.
-    """
-    if db.info.get("pantry_immediate"):
-        return
-    db.info["pantry_immediate"] = True
-
-    def _on_begin(
-        session: Session,
-        transaction: SessionTransaction,
-        connection: Any,
-    ) -> None:
-        del session
-        if transaction.parent is not None:
-            return
-        if connection.dialect.name != "sqlite":
-            return
-        connection.exec_driver_sql("BEGIN IMMEDIATE")
-
-    event.listen(db, "after_begin", _on_begin)
 
 
 def commit_cooked_meal(
@@ -73,13 +46,13 @@ def commit_cooked_meal(
     ]
     snap_by_id = {row.id: row for row in rows}
 
-    _listen_immediate(db)
-
     use_lines = [line for line in parsed.lines if isinstance(line, ProposedUseLine)]
     item_ids = list(dict.fromkeys(line.item_id for line in use_lines))
     items: dict[str, Item] = {}
     if item_ids:
-        found = db.execute(select(Item).where(Item.id.in_(item_ids))).scalars().all()
+        found = (
+            db.execute(select(Item).where(Item.id.in_(item_ids)).with_for_update()).scalars().all()
+        )
         items = {item.id: item for item in found}
 
     changed: list[str] = []
@@ -188,11 +161,10 @@ def undo_cooked_meal(db: Session, meal_id: str) -> Meal:
     """Add back each use line's stored base quantity and mark the meal undone.
 
     The caller owns ``commit()`` / ``rollback()``. A meal that is already
-    ``undone`` is returned unchanged, and that check shares the immediate
-    transaction with the quantity writes, so a second undo cannot restore twice.
+    ``undone`` is returned unchanged. The meal row is locked first, so a
+    second undo cannot restore the same quantities twice.
     """
-    _listen_immediate(db)
-    meal = db.get(Meal, meal_id)
+    meal = db.execute(select(Meal).where(Meal.id == meal_id).with_for_update()).scalar_one_or_none()
     if meal is None:
         raise MealNotFoundError(meal_id)
     if meal.status == "undone":
@@ -218,7 +190,11 @@ def _planned_restores(db: Session, meal: Meal) -> tuple[dict[str, _Restore], dic
         if amount <= 0:
             continue
         dimension = _line_dimension(line)
-        item = db.get(Item, line.item_id) if line.item_id else None
+        item = None
+        if line.item_id:
+            item = db.execute(
+                select(Item).where(Item.id == line.item_id).with_for_update()
+            ).scalar_one_or_none()
         if item is not None:
             _accumulate(live, item.id, amount, dimension, None, item.name)
             continue
@@ -296,7 +272,9 @@ def _apply_restores(
 
     creates: list[Item] = []
     for name_key, restore in orphans.items():
-        existing = db.execute(select(Item).where(Item.name_key == name_key)).scalar_one_or_none()
+        existing = db.execute(
+            select(Item).where(Item.name_key == name_key).with_for_update()
+        ).scalar_one_or_none()
         if existing is not None:
             if existing.dimension != restore.dimension.value:
                 raise UndoConflictError(

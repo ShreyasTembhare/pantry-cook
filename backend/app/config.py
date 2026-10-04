@@ -2,15 +2,20 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = {"env_prefix": "PANTRY_", "env_file": ".env"}
+    model_config = {"env_prefix": "PANTRY_", "env_file": _ENV_FILE, "extra": "ignore"}
 
-    db_path: Path = Path("data/pantry.sqlite")
-    checkpoint_db_path: Path = Path("data/checkpoints.sqlite")
+    database_url: str = "postgresql+psycopg://pantry:pantry@localhost:5432/pantry"
 
     llm_provider: str = "fake"
     llm_model: str = "openai:gpt-4o-mini"
+    llm_base_url: str = ""
+    llm_timeout: float = 30
+    llm_max_tokens: int = 0
+    llm_max_retries: int = 2
     openai_api_key: str = ""
 
     host: str = "0.0.0.0"

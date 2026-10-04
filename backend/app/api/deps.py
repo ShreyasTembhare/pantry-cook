@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Generator
 from typing import Any
 
@@ -9,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.db.engine import SessionLocal
 
 _graph: Any = None
-_checkpoint_conn: sqlite3.Connection | None = None
+_checkpointer: Any = None
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -22,32 +21,26 @@ def get_db() -> Generator[Session, None, None]:
 
 def init_graph() -> Any:
     """Open the checkpointer and compile the cook graph once per process."""
-    global _graph, _checkpoint_conn
+    global _graph, _checkpointer
     if _graph is not None:
         return _graph
 
     from app.config import settings
     from app.graph.builder import build_graph
-    from app.graph.checkpointer import StreamingSqliteSaver
+    from app.graph.checkpointer import open_postgres_saver
     from app.graph.llm import get_llm
 
-    settings.checkpoint_db_path.parent.mkdir(parents=True, exist_ok=True)
-    _checkpoint_conn = sqlite3.connect(
-        str(settings.checkpoint_db_path.resolve()),
-        check_same_thread=False,
-        timeout=30,
-    )
-    saver = StreamingSqliteSaver(_checkpoint_conn)
-    saver.setup()
-    _graph = build_graph(saver, get_llm(settings), SessionLocal)
+    _checkpointer = open_postgres_saver(settings.database_url)
+    _graph = build_graph(_checkpointer, get_llm(settings), SessionLocal)
     return _graph
 
 
 def close_graph() -> None:
-    global _graph, _checkpoint_conn
-    if _checkpoint_conn is not None:
-        _checkpoint_conn.close()
-    _checkpoint_conn = None
+    global _graph, _checkpointer
+    conn = getattr(_checkpointer, "conn", None)
+    if conn is not None:
+        conn.close()
+    _checkpointer = None
     _graph = None
 
 
@@ -62,3 +55,8 @@ def get_sentence_llm() -> Any:
     from app.graph.llm import get_llm
 
     return get_llm()
+
+
+def get_chat_model() -> Any:
+    """Same chef as cook and quick-add. Tests override this with the fake model."""
+    return get_sentence_llm()

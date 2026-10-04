@@ -6,11 +6,11 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Item, Meal, MealLine
 from app.db.repositories import ItemRepository
-from app.domain.commit import _listen_immediate
 from app.domain.errors import (
     MealLineNotFoundError,
     MealNotFoundError,
@@ -81,8 +81,7 @@ def buy_missing_line(
     its note. If none of those exist, ``QuantityRequiredError`` is raised and
     the line stays.
     """
-    _listen_immediate(db)
-    meal = db.get(Meal, meal_id)
+    meal = db.execute(select(Meal).where(Meal.id == meal_id).with_for_update()).scalar_one_or_none()
     if meal is None:
         raise MealNotFoundError(meal_id)
     line = next(
@@ -98,7 +97,7 @@ def buy_missing_line(
         raise MissingNameError()
 
     repo = ItemRepository(db)
-    existing = repo.find_by_name_key(normalise_name_key(name))
+    existing = repo.find_by_name_key(normalise_name_key(name), lock=True)
     if existing is None:
         item = repo.create(ItemCreate(name=name, quantity=measured.amount, unit=measured.unit))
         created = True

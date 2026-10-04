@@ -1,62 +1,41 @@
 """SSE cook stream: event order with the offline chef, no API key."""
 
 import json
-import sqlite3
-import tempfile
 from collections.abc import Generator
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.deps import get_db, get_graph
-from app.db.models import Base
+from app.config import settings
 from app.graph.builder import build_graph
-from app.graph.checkpointer import StreamingSqliteSaver
+from app.graph.checkpointer import open_postgres_saver
 from app.graph.llm import FakeMealModel
 from app.main import create_app
 
 
 @pytest.fixture
-def cook() -> Generator[SimpleNamespace, None, None]:
-    with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=True) as handle:
-        engine = create_engine(f"sqlite:///{handle.name}")
-
-        def set_pragmas(dbapi_conn: object, _rec: object) -> None:
-            cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-
-        event.listen(engine, "connect", set_pragmas)
-        Base.metadata.create_all(bind=engine)
-        factory = sessionmaker(bind=engine, expire_on_commit=False)
-
-        def override_db() -> Generator[Session, None, None]:
-            session = factory()
-            try:
-                yield session
-            finally:
-                session.close()
-
-        with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as checkpoint:
-            checkpoint_name = checkpoint.name
-        conn = sqlite3.connect(checkpoint_name, check_same_thread=False, timeout=30)
-        saver = StreamingSqliteSaver(conn)
-        saver.setup()
-        graph = build_graph(saver, FakeMealModel(), factory)
-        app = create_app()
-        app.dependency_overrides[get_db] = override_db
-        app.dependency_overrides[get_graph] = lambda: graph
-
+def cook(session_factory: sessionmaker[Session]) -> Generator[SimpleNamespace, None, None]:
+    def override_db() -> Generator[Session, None, None]:
+        session = session_factory()
         try:
-            with TestClient(app) as client:
-                yield SimpleNamespace(client=client, factory=factory)
+            yield session
         finally:
-            conn.close()
-            Path(checkpoint_name).unlink(missing_ok=True)
+            session.close()
+
+    saver = open_postgres_saver(settings.database_url)
+    graph = build_graph(saver, FakeMealModel(), session_factory)
+    app = create_app()
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_graph] = lambda: graph
+
+    try:
+        with TestClient(app) as client:
+            yield SimpleNamespace(client=client, factory=session_factory)
+    finally:
+        saver.conn.close()
 
 
 def _parse_sse(raw: str) -> list[tuple[str, dict[str, object]]]:

@@ -12,6 +12,22 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pantry
+          POSTGRES_PASSWORD: pantry
+          POSTGRES_DB: pantry
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pantry -d pantry"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PANTRY_DATABASE_URL: postgresql+psycopg://pantry:pantry@localhost:5432/pantry
     steps:
       - uses: actions/checkout@v4
 

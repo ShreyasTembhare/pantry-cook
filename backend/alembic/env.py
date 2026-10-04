@@ -12,9 +12,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-db_path = settings.db_path.resolve()
-db_path.parent.mkdir(parents=True, exist_ok=True)
-config.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

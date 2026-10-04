@@ -122,8 +122,9 @@ def get_llm(app_settings: Settings | None = None) -> BaseChatModel:
     """Return ``init_chat_model`` when a provider key is set, else the offline chef.
 
     The model id (``openai:gpt-4o-mini`` by default) is configuration. There is
-    no per-vendor branch. ``PANTRY_LLM_PROVIDER=fake`` always stays offline so
-    tests and the demo chef do not call a hosted model.
+    no per-vendor branch: OpenAI-compatible hosts set ``PANTRY_LLM_BASE_URL``.
+    ``PANTRY_LLM_PROVIDER=fake`` always stays offline so tests and the demo
+    chef do not call a hosted model.
     """
     cfg = app_settings or default_settings
     if llm_mode(cfg) == "fake":
@@ -132,7 +133,17 @@ def get_llm(app_settings: Settings | None = None) -> BaseChatModel:
     if key and not os.environ.get("OPENAI_API_KEY"):
         os.environ["OPENAI_API_KEY"] = key
     model = (cfg.llm_model or "openai:gpt-4o-mini").strip() or "openai:gpt-4o-mini"
-    return _init_chat_model(model, temperature=0, timeout=30, max_retries=2)
+    kwargs: dict[str, Any] = {
+        "temperature": 0,
+        "timeout": float(cfg.llm_timeout or 30),
+        "max_retries": int(cfg.llm_max_retries or 0),
+    }
+    if cfg.llm_max_tokens:
+        kwargs["max_tokens"] = int(cfg.llm_max_tokens)
+    base_url = (cfg.llm_base_url or "").strip()
+    if base_url:
+        kwargs["base_url"] = base_url
+    return _init_chat_model(model, **kwargs)
 
 
 def _init_chat_model(model: str, **kwargs: Any) -> BaseChatModel:
@@ -180,6 +191,11 @@ def _context_from_messages(messages: Any) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def rules_structured(schema: type[BaseModel], messages: Any) -> BaseModel:
+    """Deterministic structured output used offline and before hosted model calls."""
+    return _rules_for(schema, messages)
 
 
 def _rules_for(schema: Any, messages: Any) -> BaseModel:

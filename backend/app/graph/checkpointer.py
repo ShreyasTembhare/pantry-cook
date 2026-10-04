@@ -1,9 +1,9 @@
-"""File checkpointer that also serves ``graph.astream``.
+"""Postgres checkpointer for cook invoke and the cook SSE stream.
 
-``SqliteSaver`` serializes its connection with a lock, but its async methods
-raise ``NotImplementedError``. The cook stream calls those methods. This
-subclass runs the sync methods on a worker thread, so one connection serves
-both ``invoke`` and ``astream``.
+``PostgresSaver`` implements the sync checkpoint API. The cook stream calls
+the async methods, which the library leaves unimplemented, so those methods
+run the sync ones on a worker thread. The saver's own lock keeps that single
+connection to one caller at a time.
 """
 
 from __future__ import annotations
@@ -19,10 +19,14 @@ from langgraph.checkpoint.base import (
     CheckpointMetadata,
     CheckpointTuple,
 )
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg import Connection
+from psycopg.rows import dict_row
+
+from app.db.engine import psycopg_conninfo
 
 
-class StreamingSqliteSaver(SqliteSaver):
+class PostgresCookSaver(PostgresSaver):
     async def aget_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
         return await asyncio.to_thread(self.get_tuple, config)
 
@@ -70,3 +74,19 @@ class StreamingSqliteSaver(SqliteSaver):
         task_path: str = "",
     ) -> None:
         await asyncio.to_thread(self.put_writes, config, writes, task_id, task_path)
+
+    async def adelete_thread(self, thread_id: str) -> None:
+        await asyncio.to_thread(self.delete_thread, thread_id)
+
+
+def open_postgres_saver(database_url: str) -> PostgresCookSaver:
+    """Open one autocommit connection and ensure the checkpoint tables exist."""
+    conn = Connection.connect(
+        psycopg_conninfo(database_url),
+        autocommit=True,
+        prepare_threshold=0,
+        row_factory=dict_row,
+    )
+    saver = PostgresCookSaver(conn)
+    saver.setup()
+    return saver

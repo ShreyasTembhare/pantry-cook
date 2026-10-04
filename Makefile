@@ -1,11 +1,14 @@
-.PHONY: dev dev-backend dev-frontend test test-backend lint lint-backend lint-frontend typecheck format install
+.PHONY: dev dev-backend dev-frontend test test-backend lint lint-backend lint-frontend typecheck format install migrate
 
 # ── Development ──────────────────────────────────────────────
 
 dev: dev-backend dev-frontend
 
+migrate:
+	cd backend && uv run alembic upgrade head
+
 dev-backend:
-	cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8787 --reload
+	cd backend && uv run alembic upgrade head && uv run uvicorn app.main:app --host 0.0.0.0 --port 8787 --reload
 
 dev-frontend:
 	cd frontend && pnpm dev
