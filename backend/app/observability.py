@@ -20,7 +20,9 @@ _log = structlog.get_logger()
 
 def configure_logging() -> None:
     """JSON logs in production, a console renderer everywhere else."""
-    env = os.environ.get("PANTRY_ENV", "development").strip().lower()
+    from app.config import settings
+
+    env = settings.env.strip().lower()
     production = env in {"production", "prod"}
     shared: list[Any] = [
         structlog.contextvars.merge_contextvars,

@@ -1,5 +1,4 @@
 import asyncio
-import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 
@@ -8,7 +7,11 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.error_handlers import domain_error_handler, validation_error_handler
+from app.api.error_handlers import (
+    domain_error_handler,
+    unexpected_error_handler,
+    validation_error_handler,
+)
 from app.config import settings
 from app.domain.errors import DomainError
 from app.domain.sessions import SWEEP_INTERVAL_SECONDS
@@ -34,8 +37,7 @@ def _maintain_sessions() -> None:
 
 
 def _maintenance_enabled() -> bool:
-    flag = os.environ.get("PANTRY_MAINTENANCE", "1").strip().lower()
-    return flag not in {"0", "false", "off", "no"}
+    return settings.maintenance
 
 
 async def _maintenance_loop(stop: asyncio.Event) -> None:
@@ -89,6 +91,7 @@ def create_app() -> FastAPI:
 
     app.add_exception_handler(DomainError, domain_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(Exception, unexpected_error_handler)
 
     from app.api.chat import router as chat_router
     from app.api.cook import router as cook_router

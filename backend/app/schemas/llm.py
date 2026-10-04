@@ -100,29 +100,3 @@ class Violation(BaseModel):
     message: str
     item_id: str | None = None
     detail: dict[str, Any] = Field(default_factory=dict)
-
-
-class Attempt(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    attempt_no: int = Field(ge=1)
-    trigger: Literal["initial", "auto_repair", "user_revision"]
-    user_note: str | None = None
-    proposal: dict[str, Any] | None = None
-    validation_errors: list[dict[str, Any]] = Field(default_factory=list)
-
-
-class GraphError(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    code: str
-    detail: str
-    changed_item_ids: list[str] | None = None
-    violations: list[dict[str, Any]] | None = None
-
-
-class CommitResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    meal_id: str
-    title: str

@@ -5,8 +5,9 @@ import unicodedata
 from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.domain.errors import NonIntegerCountError
 from app.domain.units import Dimension, Unit
 
 
@@ -31,10 +32,11 @@ class ItemCreate(BaseModel):
             raise ValueError("Name must not be blank")
         return v.strip()
 
-    @field_validator("quantity")
-    @classmethod
-    def count_must_be_integer(cls, v: Decimal, info: object) -> Decimal:
-        return v
+    @model_validator(mode="after")
+    def count_must_be_integer(self) -> ItemCreate:
+        if self.unit == Unit.COUNT and self.quantity != self.quantity.to_integral_value():
+            raise NonIntegerCountError()
+        return self
 
 
 class ItemUpdate(BaseModel):

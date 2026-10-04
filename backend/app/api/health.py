@@ -5,12 +5,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_graph
+from app.api.error_handlers import problem_responses
 from app.db.repositories import CookSessionRepository
 
 router = APIRouter(tags=["health"])
 
 
-@router.get("/api/health")
+@router.get("/api/health", responses=problem_responses())
 def health_check(
     db: Session = Depends(get_db),  # noqa: B008
     graph: Any = Depends(get_graph),  # noqa: B008

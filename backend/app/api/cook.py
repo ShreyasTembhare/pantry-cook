@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_graph
+from app.api.error_handlers import problem_responses
 from app.schemas.cook import (
     CookConfirmRequest,
     CookReviseRequest,
@@ -19,7 +20,12 @@ from app.services.cook import CookService
 router = APIRouter(prefix="/api/cook", tags=["cook"])
 
 
-@router.post("/start", status_code=201, response_model=CookSessionRead)
+@router.post(
+    "/start",
+    status_code=201,
+    response_model=CookSessionRead,
+    responses=problem_responses(409, 422, 429, 502, 504),
+)
 def start_cook(
     body: CookStartRequest,
     db: Session = Depends(get_db),  # noqa: B008
@@ -28,7 +34,7 @@ def start_cook(
     return CookService(db, graph).start(body)
 
 
-@router.get("", response_model=list[CookSessionSummary])
+@router.get("", response_model=list[CookSessionSummary], responses=problem_responses(422))
 def list_cook_sessions(
     status: Literal[
         "running", "awaiting_user", "committed", "abandoned", "failed"
@@ -38,7 +44,11 @@ def list_cook_sessions(
     return CookService(db, graph=None).list(status)
 
 
-@router.get("/{thread_id}", response_model=CookSessionRead)
+@router.get(
+    "/{thread_id}",
+    response_model=CookSessionRead,
+    responses=problem_responses(404, 409, 422, 429, 502, 504),
+)
 def get_cook(
     thread_id: str,
     db: Session = Depends(get_db),  # noqa: B008
@@ -47,7 +57,11 @@ def get_cook(
     return CookService(db, graph).get(thread_id)
 
 
-@router.post("/{thread_id}/revise", response_model=CookSessionRead)
+@router.post(
+    "/{thread_id}/revise",
+    response_model=CookSessionRead,
+    responses=problem_responses(404, 409, 422, 429, 502, 504),
+)
 def revise_cook(
     thread_id: str,
     body: CookReviseRequest,
@@ -57,7 +71,11 @@ def revise_cook(
     return CookService(db, graph).revise(thread_id, body)
 
 
-@router.post("/{thread_id}/confirm", response_model=MealRead)
+@router.post(
+    "/{thread_id}/confirm",
+    response_model=MealRead,
+    responses=problem_responses(404, 409, 422, 429, 502, 504),
+)
 def confirm_cook(
     thread_id: str,
     body: CookConfirmRequest,
@@ -67,7 +85,11 @@ def confirm_cook(
     return CookService(db, graph).confirm(thread_id, body)
 
 
-@router.post("/{thread_id}/abandon", response_model=CookSessionRead)
+@router.post(
+    "/{thread_id}/abandon",
+    response_model=CookSessionRead,
+    responses=problem_responses(404, 409),
+)
 def abandon_cook(
     thread_id: str,
     db: Session = Depends(get_db),  # noqa: B008

@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from app.domain.errors import NonIntegerCountError
 from app.domain.units import Unit
 from app.schemas.items import ItemCreate, ItemRead, ItemUpdate, normalise_name_key
 
@@ -51,6 +52,10 @@ class TestItemCreate:
     def test_zero_quantity_allowed(self) -> None:
         item = ItemCreate(name="Rice", quantity=Decimal("0"), unit=Unit.G)
         assert item.quantity == Decimal("0")
+
+    def test_fractional_count_rejected(self) -> None:
+        with pytest.raises(NonIntegerCountError):
+            ItemCreate(name="Eggs", quantity=Decimal("1.5"), unit=Unit.COUNT)
 
     def test_extra_fields_rejected(self) -> None:
         with pytest.raises(ValidationError):

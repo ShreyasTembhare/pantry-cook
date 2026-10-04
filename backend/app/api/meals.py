@@ -1,24 +1,27 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Body, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
+from app.api.error_handlers import problem_responses
 from app.schemas.meals import BoughtMissingRead, BuyMissingRequest, MealListItem, MealRead
 from app.services.meals import MealService
 
 router = APIRouter(prefix="/api/meals", tags=["meals"])
 
 
-@router.get("", response_model=list[MealListItem])
+@router.get("", response_model=list[MealListItem], responses=problem_responses(422))
 def list_meals(
-    status: str = "cooked",
+    status: Literal["proposed", "cooked", "undone"] = "cooked",
     db: Session = Depends(get_db),  # noqa: B008
 ) -> list[MealListItem]:
     return MealService(db).list(status)
 
 
-@router.get("/{meal_id}", response_model=MealRead)
+@router.get("/{meal_id}", response_model=MealRead, responses=problem_responses(404))
 def get_meal(
     meal_id: str,
     db: Session = Depends(get_db),  # noqa: B008
@@ -26,7 +29,7 @@ def get_meal(
     return MealService(db).get(meal_id)
 
 
-@router.post("/{meal_id}/undo", response_model=MealRead)
+@router.post("/{meal_id}/undo", response_model=MealRead, responses=problem_responses(404, 409, 422))
 def undo_meal(
     meal_id: str,
     db: Session = Depends(get_db),  # noqa: B008
@@ -38,7 +41,11 @@ def undo_meal(
     return MealService(db).undo(meal_id)
 
 
-@router.post("/{meal_id}/lines/{line_id}/bought", response_model=BoughtMissingRead)
+@router.post(
+    "/{meal_id}/lines/{line_id}/bought",
+    response_model=BoughtMissingRead,
+    responses=problem_responses(404, 409, 422),
+)
 def buy_meal_line(
     meal_id: str,
     line_id: str,

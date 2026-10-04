@@ -21,6 +21,7 @@ from langgraph.types import Command
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.deps import get_db, get_graph
+from app.api.error_handlers import problem_responses
 from app.db.repositories import CookSessionRepository
 from app.graph.state import initial_cook_state
 from app.schemas.cook import CookSessionRead
@@ -301,7 +302,7 @@ async def iter_cook_sse(db: Session, graph: Any, thread_id: str) -> AsyncIterato
         yield piece
 
 
-@router.get("/{thread_id}/stream")
+@router.get("/{thread_id}/stream", responses=problem_responses(404))
 async def stream_cook(
     thread_id: str,
     db: Session = Depends(get_db),  # noqa: B008
