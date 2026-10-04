@@ -1,3 +1,3 @@
-# Pantry Cook Backend
+# Pantry Cook backend
 
-FastAPI backend for the Pantry Cook application.
+Setup, environment variables, and the API map are in the [root README](../README.md).
