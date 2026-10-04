@@ -1,0 +1,61 @@
+"use client";
+
+import { ChatCards } from "@/components/chat/chat-cards";
+import { Pip } from "@/components/mascot/pip";
+import type { ChatMessage as ChatMessageModel, Item } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+export function ChatMessage({
+  message,
+  pantry,
+  busy,
+  onConfirmPending,
+  onCancelPending,
+  onRevise,
+  onAbandon,
+  onAskConfirm,
+}: {
+  message: ChatMessageModel;
+  pantry: Item[];
+  busy: boolean;
+  onConfirmPending: (pendingId: string, acknowledgeExpired: boolean) => void;
+  onCancelPending: (pendingId: string) => void;
+  onRevise: (note: string) => void;
+  onAbandon: () => void;
+  onAskConfirm: () => void;
+}) {
+  const mine = message.role === "user";
+  const pending = message.id.startsWith("pending-user-");
+  return (
+    <div className={cn("flex gap-3", mine ? "justify-end" : "justify-start")}>
+      {mine ? null : <Pip mood="happy" className="mt-1 h-10 w-9 shrink-0" />}
+      <div className={cn("max-w-[min(100%,36rem)]", mine && "max-w-[min(100%,28rem)]")}>
+        <div
+          className={cn(
+            "rounded-3xl px-4 py-3 text-sm leading-relaxed shadow-sm",
+            mine
+              ? cn(
+                  "rounded-br-lg bg-primary text-primary-foreground",
+                  pending && "opacity-80",
+                )
+              : "rounded-bl-lg border border-border/70 bg-card/90 backdrop-blur",
+          )}
+        >
+          {message.content}
+        </div>
+        {mine ? null : (
+          <ChatCards
+            cards={message.cards}
+            pantry={pantry}
+            busy={busy}
+            onConfirmPending={onConfirmPending}
+            onCancelPending={onCancelPending}
+            onRevise={onRevise}
+            onAbandon={onAbandon}
+            onAskConfirm={onAskConfirm}
+          />
+        )}
+      </div>
+    </div>
+  );
+}

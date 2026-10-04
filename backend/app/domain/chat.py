@@ -12,11 +12,10 @@ from decimal import Decimal
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import ChatMessage, ChatPending, ChatThread, Item
-from app.db.repositories import ItemRepository, MealRepository
+from app.db.repositories import ChatRepository, ItemRepository, MealRepository
 from app.domain.buy import buy_missing_line
 from app.domain.errors import DomainError, ItemNotFoundError
 from app.domain.units import Unit
@@ -229,36 +228,15 @@ def cancel_pending(db: Session, pending: ChatPending) -> tuple[str, list[ChatCar
 
 
 def home_thread(db: Session) -> ChatThread:
-    row = db.execute(select(ChatThread).order_by(ChatThread.created_at)).scalars().first()
-    if row is None:
-        row = ChatThread()
-        db.add(row)
-        db.flush()
-    return row
+    return ChatRepository(db).home_thread()
 
 
 def open_pending(db: Session, thread_id: str) -> ChatPending | None:
-    return (
-        db.execute(
-            select(ChatPending)
-            .where(ChatPending.thread_id == thread_id, ChatPending.status == "open")
-            .order_by(ChatPending.created_at.desc())
-        )
-        .scalars()
-        .first()
-    )
+    return ChatRepository(db).open_pending(thread_id)
 
 
 def thread_messages(db: Session, thread: ChatThread) -> list[ChatMessage]:
-    return list(
-        db.execute(
-            select(ChatMessage)
-            .where(ChatMessage.thread_id == thread.id)
-            .order_by(ChatMessage.created_at, ChatMessage.id)
-        )
-        .scalars()
-        .all()
-    )
+    return ChatRepository(db).messages(thread)
 
 
 def _run_action(
@@ -312,7 +290,7 @@ def _dispatch(
 
     if action.tool == "list_meals":
         meals = MealRepository(db).list(status="cooked")
-        from app.api.meals import meal_to_list_item
+        from app.services.reading import meal_to_list_item
 
         dumped = [meal_to_list_item(meal).model_dump(mode="json") for meal in meals]
         title = "No cooked meals yet." if not dumped else "Cooked meals"
@@ -374,10 +352,10 @@ def _stage_delete(db: Session, thread: ChatThread, name: str) -> ChatCard:
 
 
 def _start_cook(db: Session, graph: Any, thread: ChatThread, sentence: str) -> ChatCard:
-    from app.api.cook import start_cook
     from app.schemas.cook import CookStartRequest
+    from app.services.cook import CookService
 
-    session = start_cook(CookStartRequest(sentence=sentence.strip()), db, graph)
+    session = CookService(db, graph).start(CookStartRequest(sentence=sentence.strip()))
     thread.active_cook_session_id = session.id
     db.flush()
     proposal = session.proposal.model_dump(mode="json") if session.proposal else None
@@ -392,11 +370,11 @@ def _start_cook(db: Session, graph: Any, thread: ChatThread, sentence: str) -> C
 
 
 def _revise(db: Session, graph: Any, thread: ChatThread, note: str) -> ChatCard:
-    from app.api.cook import revise_cook
     from app.schemas.cook import CookReviseRequest
+    from app.services.cook import CookService
 
     session_id = _active_cook_id(thread)
-    session = revise_cook(session_id, CookReviseRequest(note=note.strip()[:300]), db, graph)
+    session = CookService(db, graph).revise(session_id, CookReviseRequest(note=note.strip()[:300]))
     proposal = session.proposal.model_dump(mode="json") if session.proposal else None
     title = session.proposal.title if session.proposal else "Revised"
     return ChatCard(
@@ -409,12 +387,10 @@ def _revise(db: Session, graph: Any, thread: ChatThread, note: str) -> ChatCard:
 
 
 def _stage_confirm_cook(db: Session, graph: Any, thread: ChatThread) -> ChatCard:
-    from app.api.cook import _read_session
-    from app.db.repositories import CookSessionRepository
+    from app.services.cook import CookService
 
     session_id = _active_cook_id(thread)
-    row = CookSessionRepository(db).get(session_id)
-    session = _read_session(row, graph)
+    session = CookService(db, graph).get(session_id)
     if session.proposal is None or not session.proposal_etag:
         raise DomainError("session_not_awaiting", 409, "There is no meal waiting to cook.")
     pending = _stage(
@@ -444,16 +420,14 @@ def _confirm_cook(
     payload: dict[str, Any],
     acknowledge_expired: bool,
 ) -> tuple[ChatCard, str]:
-    from app.api.cook import confirm_cook
     from app.schemas.cook import CookConfirmRequest
+    from app.services.cook import CookService
 
     session_id = str(payload.get("cook_session_id") or thread.active_cook_session_id or "")
     etag = str(payload.get("proposal_etag") or "")
-    meal = confirm_cook(
+    meal = CookService(db, graph).confirm(
         session_id,
         CookConfirmRequest(proposal_etag=etag, acknowledge_expired=acknowledge_expired),
-        db,
-        graph,
     )
     thread.active_cook_session_id = None
     card = ChatCard(
@@ -465,16 +439,16 @@ def _confirm_cook(
 
 
 def _abandon(db: Session, graph: Any, thread: ChatThread) -> ChatCard:
-    from app.api.cook import abandon_cook
+    from app.services.cook import CookService
 
     session_id = _active_cook_id(thread)
-    abandon_cook(session_id, db, graph)
+    CookService(db, graph).abandon(session_id)
     thread.active_cook_session_id = None
     return ChatCard(type="note", title="Proposal set aside.")
 
 
 def _stage_undo(db: Session, thread: ChatThread, meal_id: str | None) -> ChatCard:
-    from app.api.meals import meal_to_read
+    from app.services.reading import meal_to_read
 
     if meal_id:
         meal = MealRepository(db).get(meal_id)
@@ -494,8 +468,8 @@ def _stage_undo(db: Session, thread: ChatThread, meal_id: str | None) -> ChatCar
 
 
 def _undo(db: Session, meal_id: str) -> tuple[ChatCard, str]:
-    from app.api.meals import meal_to_read
     from app.domain.commit import undo_cooked_meal
+    from app.services.reading import meal_to_read
 
     meal = undo_cooked_meal(db, meal_id)
     db.flush()
@@ -507,7 +481,7 @@ def _undo(db: Session, meal_id: str) -> tuple[ChatCard, str]:
 
 
 def _buy(db: Session, action: ChatAction) -> ChatCard:
-    from app.api.meals import meal_to_read
+    from app.services.reading import meal_to_read
 
     name = (action.item_name or "").casefold()
     if not name:
@@ -534,22 +508,7 @@ def _buy(db: Session, action: ChatAction) -> ChatCard:
 
 
 def _stage(db: Session, thread: ChatThread, kind: str, payload: dict[str, object]) -> ChatPending:
-    existing = (
-        db.execute(
-            select(ChatPending).where(
-                ChatPending.thread_id == thread.id,
-                ChatPending.status == "open",
-            )
-        )
-        .scalars()
-        .all()
-    )
-    for row in existing:
-        row.status = "cancelled"
-    pending = ChatPending(thread_id=thread.id, kind=kind, payload=payload, status="open")
-    db.add(pending)
-    db.flush()
-    return pending
+    return ChatRepository(db).stage(thread.id, kind, payload)
 
 
 def _item_named(db: Session, name: str) -> Item:
@@ -569,9 +528,9 @@ def _item_named(db: Session, name: str) -> Item:
 
 
 def _item_json(item: Item) -> dict[str, Any]:
-    from app.api.items import _item_to_read
+    from app.services.reading import item_to_read
 
-    return _item_to_read(item).model_dump(mode="json")
+    return item_to_read(item).model_dump(mode="json")
 
 
 def _active_cook_id(thread: ChatThread) -> str:

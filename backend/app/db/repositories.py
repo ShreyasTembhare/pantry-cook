@@ -6,7 +6,7 @@ from decimal import Decimal
 from sqlalchemy import asc, desc, func, nullslast, select
 from sqlalchemy.orm import Session
 
-from app.db.models import CookSession, Item, Meal
+from app.db.models import ChatMessage, ChatPending, ChatThread, CookSession, Item, Meal
 from app.domain.errors import (
     DuplicateItemError,
     ItemNotFoundError,
@@ -60,11 +60,7 @@ class ItemRepository:
             stmt = stmt.with_for_update()
         return self._db.execute(stmt).scalar_one_or_none()
 
-    def list(
-        self,
-        sort_by: str = "expires_on",
-        soon_within_days: int | None = None,
-    ) -> list[Item]:
+    def list(self, sort_by: str = "expires_on") -> list[Item]:
         stmt = select(Item)
 
         if sort_by == "expires_on":
@@ -147,13 +143,6 @@ class ItemRepository:
         self._db.flush()
         return item
 
-    def _to_display_quantity(self, item: Item) -> Quantity:
-        return Quantity.from_base(
-            item.quantity_base,
-            Dimension(item.dimension),
-            Unit(item.display_unit),
-        )
-
 
 def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
@@ -227,3 +216,62 @@ class CookSessionRepository:
         row.updated_at = _now()
         self._db.flush()
         return row
+
+
+class ChatRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def home_thread(self) -> ChatThread:
+        row = self._db.execute(select(ChatThread).order_by(ChatThread.created_at)).scalars().first()
+        if row is None:
+            row = ChatThread()
+            self._db.add(row)
+            self._db.flush()
+        return row
+
+    def messages(self, thread: ChatThread) -> list[ChatMessage]:
+        return list(
+            self._db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.thread_id == thread.id)
+                .order_by(ChatMessage.created_at, ChatMessage.id)
+            )
+            .scalars()
+            .all()
+        )
+
+    def open_pending(self, thread_id: str) -> ChatPending | None:
+        return (
+            self._db.execute(
+                select(ChatPending)
+                .where(ChatPending.thread_id == thread_id, ChatPending.status == "open")
+                .order_by(ChatPending.created_at.desc())
+            )
+            .scalars()
+            .first()
+        )
+
+    def get_pending(self, pending_id: str) -> ChatPending | None:
+        return self._db.get(ChatPending, pending_id)
+
+    def cancel_open(self, thread_id: str) -> None:
+        rows = (
+            self._db.execute(
+                select(ChatPending).where(
+                    ChatPending.thread_id == thread_id,
+                    ChatPending.status == "open",
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in rows:
+            row.status = "cancelled"
+
+    def stage(self, thread_id: str, kind: str, payload: dict[str, object]) -> ChatPending:
+        self.cancel_open(thread_id)
+        pending = ChatPending(thread_id=thread_id, kind=kind, payload=payload, status="open")
+        self._db.add(pending)
+        self._db.flush()
+        return pending

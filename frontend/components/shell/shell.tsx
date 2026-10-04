@@ -1,16 +1,19 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, ChefHat, Package } from "lucide-react";
+import { BookOpen, ChefHat, MessageCircle, Moon, Package, Sun } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ComponentType, ReactNode } from "react";
+import { useTheme } from "next-themes";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 
+import { Pip } from "@/components/mascot/pip";
 import { getHealth, listCookSessions } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/", label: "Pantry", icon: Package },
+  { href: "/", label: "Chat", icon: MessageCircle },
+  { href: "/pantry", label: "Pantry", icon: Package },
   { href: "/cook", label: "Cook", icon: ChefHat },
   { href: "/meals", label: "Meals", icon: BookOpen },
 ] as const;
@@ -58,7 +61,7 @@ function MobileNavLink({
     <Link
       href={href}
       className={cn(
-        "flex min-h-11 min-w-16 flex-col items-center justify-center gap-1 py-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        "flex min-h-11 min-w-14 flex-col items-center justify-center gap-1 py-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
         active ? "text-primary" : "text-muted-foreground",
       )}
     >
@@ -68,6 +71,22 @@ function MobileNavLink({
   );
 }
 
+function ThemeToggle() {
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const dark = mounted && resolvedTheme === "dark";
+  return (
+    <button
+      type="button"
+      className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+      aria-label={dark ? "Use light theme" : "Use dark theme"}
+      onClick={() => setTheme(dark ? "light" : "dark")}
+    >
+      {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+    </button>
+  );
+}
 function DemoBadge() {
   return (
     <span className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
@@ -116,26 +135,33 @@ export function Shell({ children }: { children: ReactNode }) {
     <div data-app-shell className="flex h-full flex-col lg:flex-row">
       <aside
         data-app-chrome
-        className="hidden lg:flex lg:w-56 lg:flex-col lg:border-r lg:border-border"
+        className="hidden border-border/70 bg-background/70 backdrop-blur lg:flex lg:w-64 lg:flex-col lg:border-r"
       >
-        <div className="px-5 pt-5">
-          <h1 className="font-serif text-lg font-semibold tracking-tight">Pantry Cook</h1>
-          {demoChef ? (
-            <div className="mt-2">
-              <DemoBadge />
-            </div>
-          ) : null}
+        <div className="flex items-center gap-3 px-5 pt-5">
+          <Pip className="h-12 w-10" />
+          <div>
+            <h1 className="font-serif text-lg font-semibold tracking-tight">Pantry Cook</h1>
+            <p className="text-xs text-muted-foreground">Pip, your kitchen chef</p>
+            {demoChef ? (
+              <div className="mt-2">
+                <DemoBadge />
+              </div>
+            ) : null}
+          </div>
         </div>
         <nav aria-label="Primary" className="flex flex-1 flex-col gap-1 px-3 py-4">
           {navItems.map((item) => (
             <NavLink key={item.href} {...item} active={isActive(item.href)} />
           ))}
         </nav>
-        {latest ? (
-          <div className="px-3 pb-5">
+        <div className="flex items-center justify-between gap-2 px-3 pb-5">
+          {latest ? (
             <UnfinishedPill href={`/cook/${latest.id}`} sentence={latest.sentence} count={unfinished.length} />
-          </div>
-        ) : null}
+          ) : (
+            <span />
+          )}
+          <ThemeToggle />
+        </div>
       </aside>
 
       <div data-app-column className="flex min-h-0 flex-1 flex-col">
@@ -144,15 +170,26 @@ export function Shell({ children }: { children: ReactNode }) {
           className="flex min-h-14 items-center justify-between gap-3 border-b border-border px-4 py-2 lg:hidden"
         >
           <div className="flex items-center gap-2">
+            <Pip className="h-9 w-8" />
             <h1 className="font-serif text-lg font-semibold tracking-tight">Pantry Cook</h1>
             {demoChef ? <DemoBadge /> : null}
           </div>
-          {latest ? (
-            <UnfinishedPill href={`/cook/${latest.id}`} sentence={latest.sentence} count={unfinished.length} />
-          ) : null}
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            {latest ? (
+              <UnfinishedPill href={`/cook/${latest.id}`} sentence={latest.sentence} count={unfinished.length} />
+            ) : null}
+          </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        <main
+          className={cn(
+            "flex min-h-0 flex-1 flex-col",
+            pathname === "/" ? "overflow-hidden" : "overflow-y-auto",
+          )}
+        >
+          {children}
+        </main>
 
         <nav
           data-app-chrome
