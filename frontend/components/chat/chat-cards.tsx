@@ -2,43 +2,9 @@
 
 import Link from "next/link";
 
-import { ProposalCard, type PantryAmount, type ProposalLine, type ProposalView } from "@/components/cook/proposal-card";
+import { ProposalCard, type PantryAmount } from "@/components/cook/proposal-card";
 import { Button } from "@/components/ui/button";
 import type { ChatCard, Item } from "@/lib/api";
-
-function asProposal(value: Record<string, unknown> | null | undefined): ProposalView | null {
-  if (!value || typeof value !== "object") return null;
-  const lines: ProposalLine[] = [];
-  if (Array.isArray(value.lines)) {
-    for (const line of value.lines) {
-      if (!line || typeof line !== "object") continue;
-      const row = line as Record<string, unknown>;
-      if (row.kind === "use" && typeof row.item_id === "string") {
-        lines.push({
-          kind: "use",
-          item_id: row.item_id,
-          quantity: String(row.quantity ?? ""),
-          unit: String(row.unit ?? ""),
-        });
-      } else if (row.kind === "missing" && typeof row.name === "string") {
-        lines.push({
-          kind: "missing",
-          name: row.name,
-          quantity_note: typeof row.quantity_note === "string" ? row.quantity_note : null,
-        });
-      }
-    }
-  }
-  return {
-    title: typeof value.title === "string" ? value.title : "A meal",
-    servings: typeof value.servings === "number" ? value.servings : undefined,
-    rationale: typeof value.rationale === "string" ? value.rationale : null,
-    steps: Array.isArray(value.steps)
-      ? value.steps.filter((step): step is string => typeof step === "string")
-      : [],
-    lines,
-  };
-}
 
 function pantryMap(items: Item[]): Record<string, PantryAmount> {
   return Object.fromEntries(
@@ -108,32 +74,28 @@ export function ChatCards({
             <div key={key} className="rounded-2xl border border-border/80 bg-card/80 p-3 shadow-sm">
               <p className="text-sm font-medium">{card.title}</p>
               <ul className="mt-2 space-y-1 text-sm">
-                {card.meals.map((meal) => {
-                  const id = String(meal.id ?? "");
-                  const title = String(meal.title ?? "Meal");
-                  return (
-                    <li key={id}>
-                      <Link href={`/meals/${id}`} className="text-primary">
-                        {title}
-                      </Link>
-                    </li>
-                  );
-                })}
+                {card.meals.map((meal) => (
+                  <li key={meal.id}>
+                    <Link href={`/meals/${meal.id}`} className="text-primary">
+                      {meal.title}
+                    </Link>
+                  </li>
+                ))}
               </ul>
             </div>
           );
         }
 
         if (card.type === "meal" && card.meal) {
-          const id = String(card.meal.id ?? "");
           return (
             <div key={key} className="rounded-2xl border border-border/80 bg-card/80 p-3 shadow-sm">
               <p className="text-sm font-medium">{card.title}</p>
-              {id ? (
-                <Link href={`/meals/${id}`} className="mt-2 inline-block text-xs font-medium text-primary">
-                  Open meal
-                </Link>
-              ) : null}
+              <Link
+                href={`/meals/${card.meal.id}`}
+                className="mt-2 inline-block text-xs font-medium text-primary"
+              >
+                Open meal
+              </Link>
             </div>
           );
         }
@@ -153,7 +115,7 @@ export function ChatCards({
           );
         }
 
-        const proposal = asProposal(card.proposal);
+        const proposal = card.proposal;
         if ((card.type === "proposal" || card.pending_kind === "confirm_cook") && proposal) {
           const pendingId = card.pending_id;
           return (

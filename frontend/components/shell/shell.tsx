@@ -5,7 +5,7 @@ import { BookOpen, ChefHat, MessageCircle, Moon, Package, Sun } from "lucide-rea
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 
 import { Pip } from "@/components/mascot/pip";
 import { getHealth, listCookSessions } from "@/lib/api";
@@ -71,10 +71,17 @@ function MobileNavLink({
   );
 }
 
+function useMounted() {
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+}
+
 function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useMounted();
   const dark = mounted && resolvedTheme === "dark";
   return (
     <button
