@@ -8,7 +8,7 @@ Python 3.12, FastAPI, SQLAlchemy, Alembic, LangGraph, Postgres, Next.js 16, Tail
 
 ## Prerequisites
 
-- Docker
+- PostgreSQL 16+ (local install or any reachable server)
 - Python 3.12+
 - Node.js 22+
 - [uv](https://docs.astral.sh/uv/)
@@ -16,18 +16,23 @@ Python 3.12, FastAPI, SQLAlchemy, Alembic, LangGraph, Postgres, Next.js 16, Tail
 
 ## Setup
 
+Create a database and user (once), then copy env and install:
+
 ```bash
+# psql as a superuser, adjust names to match .env
+create user pantry with password 'pantry';
+create database pantry owner pantry;
+
 cp .env.example .env
-docker compose up -d
 make install
-make migrate
-make dev-backend
-make dev-frontend
+./dev.sh
 ```
+
+Or run backend and frontend separately: `make migrate`, `make dev-backend`, and `make dev-frontend` in another terminal.
 
 The API listens on port 8787 and the app on port 3939. `make dev-backend` applies migrations before it starts. OpenAPI schemas are at [http://localhost:8787/docs](http://localhost:8787/docs).
 
-If port 5432 is already in use, point `PANTRY_DATABASE_URL` at the Postgres you want to use.
+Point `PANTRY_DATABASE_URL` at the Postgres instance you use if it is not on `localhost:5432`.
 
 ## Environment
 

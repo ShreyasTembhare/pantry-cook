@@ -1,5 +1,6 @@
 """Meal proposal and cook request contracts."""
 
+import json
 from decimal import Decimal
 
 import pytest
@@ -7,7 +8,13 @@ from pydantic import ValidationError
 
 from app.domain.units import Unit
 from app.schemas.cook import CookConfirmRequest, CookReviseRequest, CookStartRequest, ResumePayload
-from app.schemas.llm import Constraints, MealProposal, ProposedMissingLine, ProposedUseLine
+from app.schemas.llm import (
+    Constraints,
+    DraftMealProposal,
+    MealProposal,
+    ProposedMissingLine,
+    ProposedUseLine,
+)
 
 
 class TestMealProposal:
@@ -69,6 +76,26 @@ class TestConstraints:
         assert constraints.must_use_item_ids == []
         assert constraints.dietary == []
         assert constraints.max_minutes is None
+
+
+class TestDraftMealProposal:
+    def test_schema_omits_the_decimal_lookahead_nvidia_rejects(self) -> None:
+        encoded = json.dumps(DraftMealProposal.model_json_schema())
+        assert "(?!" not in encoded
+        assert "(?!" in json.dumps(MealProposal.model_json_schema())
+
+    def test_converts_floats_into_a_meal_proposal(self) -> None:
+        proposal = DraftMealProposal(
+            title="Chicken and leeks",
+            servings=2,
+            lines=[
+                {"kind": "use", "item_id": "chicken", "quantity": 200, "unit": "g"},
+                {"kind": "missing", "name": "olive oil", "quantity_note": "a splash"},
+            ],
+            steps=["Cook gently."],
+        ).to_proposal()
+        assert proposal.lines[0].quantity == Decimal("200")
+        assert proposal.lines[1].kind == "missing"
 
 
 class TestCookRequests:

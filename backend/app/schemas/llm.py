@@ -79,6 +79,61 @@ class MealProposal(BaseModel):
         return cleaned
 
 
+class DraftProposalLine(BaseModel):
+    """Model-facing line. Floats avoid the Decimal regex NVIDIA's grammar rejects."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    kind: Literal["use", "missing"] = "use"
+    item_id: str | None = None
+    name: str | None = None
+    quantity: float | None = None
+    unit: Literal["g", "kg", "ml", "L", "count"] | None = None
+    quantity_note: str | None = None
+
+
+class DraftMealProposal(BaseModel):
+    """What the hosted chef returns. Converted to ``MealProposal`` before validation."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    title: str = Field(min_length=1, max_length=80)
+    servings: int = Field(default=2, ge=1, le=24)
+    lines: list[DraftProposalLine] = Field(default_factory=list, max_length=20)
+    steps: list[str] = Field(default_factory=list, max_length=15)
+    rationale: str | None = None
+
+    def to_proposal(self) -> MealProposal:
+        lines: list[ProposedUseLine | ProposedMissingLine] = []
+        for line in self.lines:
+            if line.kind == "missing":
+                name = (line.name or "").strip()
+                if name:
+                    lines.append(ProposedMissingLine(name=name, quantity_note=line.quantity_note))
+                continue
+            item_id = (line.item_id or "").strip()
+            if not item_id or line.quantity is None or line.quantity <= 0 or line.unit is None:
+                continue
+            lines.append(
+                ProposedUseLine(
+                    item_id=item_id,
+                    quantity=Decimal(str(line.quantity)),
+                    unit=Unit(line.unit),
+                )
+            )
+        steps = [step.strip() for step in self.steps if step and step.strip()]
+        title = self.title.strip()
+        if len(title) < 3 or not lines or not steps:
+            raise ValueError("draft proposal is incomplete")
+        return MealProposal(
+            title=title[:80],
+            servings=self.servings,
+            lines=lines,
+            steps=steps,
+            rationale=self.rationale,
+        )
+
+
 class PantryRow(BaseModel):
     """Compact pantry row carried in graph state and the proposal snapshot."""
 

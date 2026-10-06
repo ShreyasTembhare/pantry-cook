@@ -10,9 +10,8 @@ out/
 dist/
 *.egg-info/
 
-# Data
+# Local Postgres data (optional; not used by the repo)
 backend/data/
-*.sqlite
 
 # Environment
 .env

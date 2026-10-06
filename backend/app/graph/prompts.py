@@ -19,4 +19,5 @@ If violations are listed, fix those and change as little else as possible.
 If the user left a note, honour it.
 Prefer items that expire soonest. Avoid expired items unless the sentence names them.
 Counts must be whole numbers. Quantities must fit what is available.
+Units are only g, kg, ml, L, or count.
 When the pantry has food that is still good, include at least one use line."""

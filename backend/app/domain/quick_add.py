@@ -137,13 +137,13 @@ def parse_pantry_sentence(sentence: str, llm: BaseChatModel) -> ResolvedPantryBa
         return normalise_draft(rules_parse_sentence(text))
     except SentenceUnparsedError as rules_error:
         ruled_error = rules_error
-    from app.graph.llm import FakeMealModel, llm_mode
+    from app.graph.llm import FakeMealModel, invoke_structured, llm_mode
 
     scripted = isinstance(llm, FakeMealModel) and bool(llm.script)
     if not scripted and (isinstance(llm, FakeMealModel) or llm_mode() == "fake"):
         raise ruled_error
     try:
-        raw = llm.with_structured_output(DraftPantrySentence).invoke(messages_for_sentence(text))
+        raw = invoke_structured(llm, DraftPantrySentence, messages_for_sentence(text))
     except DomainError:
         raise
     except Exception as exc:

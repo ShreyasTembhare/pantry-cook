@@ -9,11 +9,17 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+)
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import RunnableLambda
 from langchain_core.runnables.config import RunnableConfig
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
 from app.config import Settings
 from app.config import settings as default_settings
@@ -138,18 +144,185 @@ def get_llm(
         os.environ["OPENAI_API_KEY"] = key
     model = (model or cfg.llm_model or "openai:gpt-4o-mini").strip() or "openai:gpt-4o-mini"
     kwargs: dict[str, Any] = {
-        "temperature": 0,
+        "temperature": float(cfg.llm_temperature),
         "timeout": float(cfg.llm_timeout or 30),
         "max_retries": int(cfg.llm_max_retries or 0),
     }
     if cfg.llm_max_tokens:
         kwargs["max_tokens"] = int(cfg.llm_max_tokens)
+    if cfg.llm_top_p is not None:
+        kwargs["top_p"] = float(cfg.llm_top_p)
     base_url = (cfg.llm_base_url or "").strip()
     if base_url:
         kwargs["base_url"] = base_url
+    if cfg.llm_thinking:
+        kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
     if reasoning_effort:
         kwargs["reasoning_effort"] = reasoning_effort
     return _init_chat_model(model, **kwargs)
+
+
+_JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
+
+
+def invoke_structured(llm: BaseChatModel, schema: type[BaseModel], messages: Any) -> BaseModel:
+    """Structured call. Hosted models get a JSON schema; fenced answers are still parsed.
+
+    DiffusionGemma wraps JSON in a markdown fence even when ``response_format`` is set,
+    and the OpenAI client then rejects the message. A schema dict keeps the raw text so
+    the fence can be removed here. The offline chef is unchanged.
+    """
+    if not _hosted_openai(llm):
+        value = llm.with_structured_output(schema).invoke(messages)
+        if isinstance(value, schema):
+            return value
+        return schema.model_validate(value)
+    return _invoke_json_schema(llm, schema, messages)
+
+
+def _hosted_openai(llm: BaseChatModel) -> bool:
+    return type(llm).__module__.startswith("langchain_openai")
+
+
+_JSON_HINTS: dict[str, str] = {
+    "DraftChatPlan": (
+        'Return one JSON object and nothing else. Example: {"reply":"The leeks are in the fridge.",'
+        '"actions":[]}.'
+    ),
+    "DraftMealProposal": (
+        "Return one JSON object and nothing else. Example: "
+        '{"title":"Chicken and leeks","servings":2,"lines":['
+        '{"kind":"use","item_id":"item-1","quantity":200,"unit":"g"}],'
+        '"steps":["Cook it."],"rationale":"Uses what is on hand."}'
+    ),
+    "Constraints": (
+        "Return one JSON object and nothing else. Example: "
+        '{"must_use_item_ids":[],"avoid":[],"dietary":[],"max_minutes":null,'
+        '"servings":2,"mood":null,"free_text_notes":null}'
+    ),
+    "DraftPantrySentence": (
+        'Return one JSON object and nothing else. Example: {"items":[{"name":"leeks",'
+        '"quantity":2,"unit":"count"}]}'
+    ),
+}
+
+
+def _json_hint(schema: type[BaseModel]) -> str:
+    named = _JSON_HINTS.get(schema.__name__)
+    if named:
+        return named
+    keys = ", ".join(schema.model_fields)
+    return f"Return one JSON object and nothing else. Use only these keys: {keys}."
+
+
+def _with_json_hint(schema: type[BaseModel], messages: Any) -> list[Any]:
+    hint = _json_hint(schema)
+    if isinstance(messages, list) and messages and isinstance(messages[0], SystemMessage):
+        content = messages[0].content
+        if isinstance(content, str):
+            if hint in content:
+                return messages
+            return [SystemMessage(content=f"{content}\n{hint}"), *messages[1:]]
+    body = list(messages) if isinstance(messages, list) else [messages]
+    return [SystemMessage(content=hint), *body]
+
+
+def _response_format(schema: type[BaseModel]) -> dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "json_schema": {"name": schema.__name__, "schema": _schema_for_host(schema)},
+    }
+
+
+def _invoke_json_schema(llm: BaseChatModel, schema: type[BaseModel], messages: Any) -> BaseModel:
+    message = llm.invoke(
+        _with_json_hint(schema, messages), response_format=_response_format(schema)
+    )
+    try:
+        return _parse_model(schema, _message_content(message))
+    except (ValidationError, json.JSONDecodeError, ValueError):
+        raw = _message_content(message).strip()
+        if not raw:
+            raise
+        repaired = llm.invoke(
+            [
+                SystemMessage(
+                    content=_json_hint(schema) + " Rewrite the answer as that JSON object only."
+                ),
+                HumanMessage(content=raw[:4000]),
+            ],
+            response_format=_response_format(schema),
+        )
+        return _parse_model(schema, _message_content(repaired))
+
+
+def _parse_model(schema: type[BaseModel], content: str) -> BaseModel:
+    text = _json_text(content)
+    if not text:
+        raise ValueError("empty model content")
+    try:
+        parsed: Any = json.loads(text)
+    except json.JSONDecodeError:
+        parsed, _end = json.JSONDecoder().raw_decode(text)
+    if isinstance(parsed, dict):
+        fitted: dict[str, Any] = {}
+        for key, value in parsed.items():
+            field = schema.model_fields.get(key)
+            if field is None:
+                continue
+            # A null on an optional field should use the default, not fail the object.
+            if value is None and not field.is_required():
+                continue
+            fitted[key] = value
+        parsed = fitted
+    return schema.model_validate(parsed)
+
+
+def _schema_for_host(schema: type[BaseModel]) -> dict[str, Any]:
+    """Drop the Decimal lookahead. NVIDIA's grammar compiler rejects ``(?!``."""
+    return _strip_lookahead(schema.model_json_schema())
+
+
+def _strip_lookahead(node: Any) -> Any:
+    if isinstance(node, dict):
+        cleaned: dict[str, Any] = {}
+        for key, value in node.items():
+            if key == "pattern" and isinstance(value, str) and "(?!" in value:
+                continue
+            cleaned[key] = _strip_lookahead(value)
+        return cleaned
+    if isinstance(node, list):
+        return [_strip_lookahead(item) for item in node]
+    return node
+
+
+def _json_text(content: str) -> str:
+    text = content.strip()
+    match = _JSON_FENCE.search(text)
+    if match:
+        text = match.group(1).strip()
+    if text.startswith("{") or text.startswith("["):
+        return text
+    start = text.find("{")
+    end = text.rfind("}")
+    if 0 <= start < end:
+        return text[start : end + 1]
+    return text
+
+
+def _message_content(message: Any) -> str:
+    content = getattr(message, "content", message)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                parts.append(str(block.get("text") or ""))
+        return "\n".join(part for part in parts if part)
+    return "" if content is None else str(content)
 
 
 def _init_chat_model(model: str, **kwargs: Any) -> BaseChatModel:

@@ -31,7 +31,14 @@ def init_graph() -> Any:
     from app.graph.llm import get_llm
 
     _checkpointer = open_postgres_saver(settings.database_url)
-    _graph = build_graph(_checkpointer, get_llm(settings), SessionLocal)
+    _graph = build_graph(
+        _checkpointer,
+        get_llm(
+            settings,
+            reasoning_effort=settings.chat_reasoning_effort.strip() or None,
+        ),
+        SessionLocal,
+    )
     return _graph
 
 

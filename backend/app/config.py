@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     llm_timeout: float = 30
     llm_max_tokens: int = 0
     llm_max_retries: int = 2
+    llm_temperature: float = 0
+    llm_top_p: float | None = None
+    # Hosts such as NVIDIA pass this through as chat_template_kwargs.enable_thinking.
+    llm_thinking: bool = False
     # Optional faster model for home chat. Empty means use PANTRY_LLM_MODEL.
     chat_model: str = ""
     # low, medium, or high for reasoning models such as gpt-oss. Empty leaves the default.
@@ -39,9 +43,9 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3939",
     ]
 
-    @field_validator("maintenance", mode="before")
+    @field_validator("maintenance", "llm_thinking", mode="before")
     @classmethod
-    def parse_maintenance(cls, value: object) -> object:
+    def parse_flag(cls, value: object) -> object:
         if isinstance(value, str):
             return value.strip().lower() not in {"0", "false", "off", "no"}
         return value

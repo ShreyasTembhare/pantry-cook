@@ -23,12 +23,13 @@ from app.domain.commit import commit_cooked_meal
 from app.domain.errors import DomainError
 from app.domain.expiry import is_expired
 from app.domain.units import Dimension, Quantity, Unit
-from app.graph.llm import llm_mode
+from app.graph.llm import FakeMealModel, invoke_structured, llm_mode
 from app.graph.prompts import EXPIRING_COOK_NOTE, PARSE_SYSTEM, PROPOSE_SYSTEM
 from app.graph.state import MAX_AUTO_REPAIR, MAX_TOTAL_ATTEMPTS, CookState
 from app.schemas.cook import ResumePayload
 from app.schemas.llm import (
     Constraints,
+    DraftMealProposal,
     MealProposal,
     PantryRow,
     ProposedUseLine,
@@ -132,7 +133,13 @@ def propose_meal(state: CookState, llm: BaseChatModel) -> dict[str, Any]:
     ]
     started = time.perf_counter()
     try:
-        proposal = _structured_or_llm_value(llm, MealProposal, messages)
+        # The hosted grammar compiler rejects Pydantic's Decimal pattern.
+        # The offline chef still fills MealProposal directly.
+        schema = MealProposal if isinstance(llm, FakeMealModel) else DraftMealProposal
+        raw = _structured_or_llm_value(llm, schema, messages)
+        proposal = raw.to_proposal() if isinstance(raw, DraftMealProposal) else raw
+        if not isinstance(proposal, MealProposal):
+            proposal = DraftMealProposal.model_validate(proposal).to_proposal()
     except StructuredOutputError as exc:
         result = {
             "proposal": None,
@@ -144,6 +151,15 @@ def propose_meal(state: CookState, llm: BaseChatModel) -> dict[str, Any]:
         }
     except LlmCallError as exc:
         result = {"proposal": None, "error": _llm_payload(exc)}
+    except (ValidationError, ValueError) as exc:
+        result = {
+            "proposal": None,
+            "error": {
+                "code": "llm_output_invalid",
+                "detail": "The proposal came back garbled.",
+                "cause": str(exc),
+            },
+        }
     else:
         result = {"proposal": proposal.model_dump(mode="json"), "error": None}
     _log_node("propose_meal", state, started)
@@ -548,7 +564,7 @@ def _structured_or_llm(
 
 def _invoke_once(llm: BaseChatModel, schema: type[BaseModel], messages: list[Any]) -> Any:
     try:
-        return llm.with_structured_output(schema).invoke(messages)
+        return invoke_structured(llm, schema, messages)
     except LlmCallError:
         raise
     except Exception as exc:

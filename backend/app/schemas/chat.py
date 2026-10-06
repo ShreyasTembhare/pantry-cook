@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.units import Unit
 
@@ -79,6 +79,13 @@ class DraftChatPlan(BaseModel):
 
     reply: str = Field(min_length=1, max_length=2000)
     actions: list[DraftChatAction] = Field(default_factory=list, max_length=3)
+
+    @field_validator("actions", mode="before")
+    @classmethod
+    def drop_non_objects(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return []
+        return [item for item in value if not isinstance(item, str)]
 
     def to_plan(self) -> ChatPlan:
         return ChatPlan(reply=self.reply, actions=[a.to_action() for a in self.actions])

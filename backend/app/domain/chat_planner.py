@@ -23,6 +23,7 @@ from app.config import settings
 from app.db.models import ChatPending, ChatThread
 from app.db.repositories import ChatRepository, ItemRepository, MealRepository
 from app.domain.expiry import is_expired
+from app.graph.llm import invoke_structured
 from app.schemas.chat import ChatAction, ChatPlan, ChatTool, DraftChatPlan
 
 _log = structlog.get_logger(__name__)
@@ -121,7 +122,7 @@ def model_plan(llm: BaseChatModel, text: str, context: dict[str, Any]) -> ChatPl
     budget = float(settings.chat_planner_timeout or 40)
     pool = ThreadPoolExecutor(max_workers=1)
     try:
-        future = pool.submit(llm.with_structured_output(DraftChatPlan).invoke, messages)
+        future = pool.submit(invoke_structured, llm, DraftChatPlan, messages)
         raw = future.result(timeout=budget)
     except FutureTimeout:
         _log.warning("chat_planner_timeout", budget=budget)
